@@ -9,6 +9,7 @@ package main
 #include <xdo.h>
 */
 import "C"
+
 import (
 	"context"
 	"errors"
@@ -23,6 +24,7 @@ import (
 	"strings"
 	"unsafe"
 
+	"deedles.dev/ptt-fix/internal/evdev"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -36,7 +38,7 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	d, err := OpenDevice(device)
+	d, err := evdev.Open(device)
 	if err != nil {
 		panic(err)
 	}

@@ -1,4 +1,4 @@
-package main
+package evdev
 
 /*
 #include <linux/input.h>
@@ -36,7 +36,7 @@ type Device struct {
 	bitsREL, bitsABS, bitsLED, bitsKEY, bitsSW, bitsMSC, bitsFF, bitsSND []byte
 }
 
-func OpenDevice(path string) (*Device, error) {
+func Open(path string) (*Device, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
