@@ -59,11 +59,7 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 	}
 	defer d.Close()
 
-	slog := slog.With(slog.Group(
-		"device",
-		slog.String("path", device),
-		slog.String("name", d.Name),
-	))
+	slog := slog.With("device", device)
 
 	go func() {
 		<-ctx.Done()
@@ -72,6 +68,7 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 
 	slog.Info(
 		"initialized device",
+		"name", d.Name,
 		"bus", d.BusType,
 		"vendor", d.Vendor,
 		"product", d.Product,
