@@ -6,7 +6,9 @@ This program provides a simple workaround to the problem of push-to-talk in Wayl
 Installation
 ------------
 
-To install, simply run
+If you are on Arch Linux, ptt-fix is available from the AUR as [`ptt-fix`][aur].
+
+To install manually, you will need `libxdo` installed. Then, simply run
 
 ```bash
 $ go install deedles.dev/ptt-fix@latest
@@ -30,3 +32,4 @@ ptt-fix -key 12 -sym minus /dev/input/event7
 And that's it. As long as the program is running, the minus key being pressed on your keyboard will be forwarded to X programs that are listening for it, such as Discord. If you'd like to listen to multiple devices, for example because you have a keyboard button mapped to your mouse and you want both devices to work, just list all of them when running the program.
 
 [rush]: https://github.com/Rush/wayland-push-to-talk-fix
+[aur]: https://aur.archlinux.org/packages/ptt-fix
