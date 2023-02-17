@@ -94,8 +94,6 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 			}
 		}
 	}
-
-	return nil
 }
 
 func handle(ctx context.Context, xdo *C.struct_xdo, key *C.char, ev <-chan int) error {
