@@ -15,6 +15,8 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -179,6 +181,10 @@ func run(ctx context.Context) error {
 }
 
 func main() {
+	if addr := os.Getenv("PPROF_ADDR"); addr != "" {
+		go func() { log.Fatalln(http.ListenAndServe(addr, nil)) }()
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
