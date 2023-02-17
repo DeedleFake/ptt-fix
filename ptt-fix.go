@@ -15,7 +15,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -25,6 +24,7 @@ import (
 	"unsafe"
 
 	"deedles.dev/ptt-fix/internal/evdev"
+	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -49,17 +49,17 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 		d.Close()
 	}()
 
-	log.Printf(
-		"initialized input device %q, name: %q, bus: %x, vendor: %x, product: %x",
-		device,
-		d.Name,
-		d.BusType,
-		d.Vendor,
-		d.Product,
+	slog.Info(
+		"initialized device",
+		"path", device,
+		"name", d.Name,
+		"bus", d.BusType,
+		"vendor", d.Vendor,
+		"product", d.Product,
 	)
 
 	if !d.HasEventCode(C.EV_KEY, keycode) {
-		log.Printf("device %q (%v) is not capable of sending requested key code, ignoring", device, d.Name)
+		slog.Info("ignoring device", "path", device, "name", d.Name, "reason", "incapable of sending requested key code")
 		return nil
 	}
 
@@ -70,7 +70,7 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 				return err
 			}
 
-			log.Printf("read event from %q: %v", d.Name, err)
+			slog.Warn("read event", "device", device, "name", d.Name, slog.ErrorKey, err)
 			continue
 		}
 
@@ -108,10 +108,10 @@ func handle(ctx context.Context, xdo *C.struct_xdo, key *C.char, ev <-chan int) 
 			switch ev {
 			case eventUp:
 				C.xdo_send_keysequence_window_up(xdo, C.CURRENTWINDOW, key, 0)
-				log.Printf("deactivated")
+				slog.Info("deactivated")
 			case eventDown:
 				C.xdo_send_keysequence_window_down(xdo, C.CURRENTWINDOW, key, 0)
-				log.Println("activated")
+				slog.Info("activated")
 			default:
 				return fmt.Errorf("invalid event: %v", ev)
 			}
@@ -187,7 +187,7 @@ func run(ctx context.Context) error {
 
 func main() {
 	if addr := os.Getenv("PPROF_ADDR"); addr != "" {
-		go func() { log.Fatalln(http.ListenAndServe(addr, nil)) }()
+		go func() { slog.Error("start pprof HTTP server", http.ListenAndServe(addr, nil)) }()
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -195,6 +195,7 @@ func main() {
 
 	err := run(ctx)
 	if err != nil {
-		log.Fatalf("Error: %v", err)
+		slog.Error("fatal", err)
+		os.Exit(1)
 	}
 }
