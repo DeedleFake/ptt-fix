@@ -27,6 +27,7 @@ import (
 	"deedles.dev/ptt-fix/internal/evdev"
 	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -80,6 +81,10 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 			}
 			if errors.Is(err, fs.ErrClosed) {
 				slog.Warn("device closed while reading", "device", device, "name", d.Name)
+				return nil
+			}
+			if errno := *new(unix.Errno); errors.As(err, &errno) && !errno.Temporary() {
+				slog.Warn("device disappeared while reading", "device", device, "name", d.Name, slog.ErrorKey, err)
 				return nil
 			}
 
