@@ -1,11 +1,11 @@
 package main
 
 /*
-#cgo pkg-config: libevdev libxdo
+#cgo pkg-config: libxdo
 
 #include <malloc.h>
 #include <errno.h>
-#include <libevdev/libevdev.h>
+#include <linux/input.h>
 #include <xdo.h>
 */
 import "C"
@@ -21,7 +21,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"unsafe"
 
 	"golang.org/x/sync/errgroup"
@@ -33,82 +32,65 @@ const (
 	eventDown
 )
 
-func listen(ctx context.Context, device string, keycode C.uint, out chan<- int) error {
+func listen(ctx context.Context, device string, keycode uint16, out chan<- int) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	file, err := os.Open(device)
+	d, err := OpenDevice(device)
 	if err != nil {
-		return err
+		panic(err)
 	}
-	defer file.Close()
+	defer d.Close()
 
-	conn, err := file.SyscallConn()
-	if err != nil {
-		return fmt.Errorf("syscall conn for %q: %w", device, err)
+	go func() {
+		<-ctx.Done()
+		d.Close()
+	}()
+
+	log.Printf(
+		"initialized input device %q, name: %q, bus: %x, vendor: %x, product: %x",
+		device,
+		d.Name,
+		d.BusType,
+		d.Vendor,
+		d.Product,
+	)
+
+	if !d.HasEventCode(C.EV_KEY, keycode) {
+		log.Printf("device %q (%v) is not capable of sending requested key code, ignoring", device, d.Name)
+		return nil
 	}
 
-	err = control(conn, func(fd uintptr) error {
-		go func() {
-			<-ctx.Done()
-			syscall.Close(int(fd))
-		}()
-
-		var dev *C.struct_libevdev
-		_, err := C.libevdev_new_from_fd(C.int(fd), &dev)
+	for {
+		ev, err := d.NextEvent()
 		if err != nil {
-			log.Printf("ignoring %q because of error in libevdev init: %v", device, err)
-			return nil
-		}
-		defer C.libevdev_free(dev)
+			if ctx.Err() != nil {
+				return err
+			}
 
-		devname := C.GoString(C.libevdev_get_name(dev))
-		log.Printf(
-			"initialized input device %q, name: %q, bus: %x, vendor: %x, product: %x",
-			device,
-			devname,
-			C.libevdev_get_id_bustype(dev),
-			C.libevdev_get_id_vendor(dev),
-			C.libevdev_get_id_product(dev),
-		)
-
-		if C.libevdev_has_event_code(dev, C.EV_KEY, keycode) == 0 {
-			log.Printf("device %q (%v) is not capable of sending requested key code, ignoring", device, devname)
-			return nil
+			log.Printf("read event from %q: %v", d.Name, err)
+			continue
 		}
 
-		for {
-			var ev C.struct_input_event
-			rc := C.libevdev_next_event(dev, C.LIBEVDEV_READ_FLAG_NORMAL, &ev)
-			switch rc {
-			case C.LIBEVDEV_READ_STATUS_SYNC, C.LIBEVDEV_READ_STATUS_SUCCESS, -C.EAGAIN:
-			default:
+		if !ev.Is(C.EV_KEY, keycode) {
+			continue
+		}
+
+		switch ev.Value {
+		case 2:
+		case 1:
+			select {
+			case <-ctx.Done():
 				return ctx.Err()
+			case out <- eventDown:
 			}
-
-			if C.libevdev_event_is_code(&ev, C.EV_KEY, keycode) == 0 {
-				continue
-			}
-
-			switch ev.value {
-			case 2:
-			case 1:
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case out <- eventDown:
-				}
-			default:
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case out <- eventUp:
-				}
+		default:
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case out <- eventUp:
 			}
 		}
-	})
-	if err != nil {
-		return fmt.Errorf("listen for events from %q: %w", device, err)
 	}
 
 	return nil
@@ -191,7 +173,7 @@ func run(ctx context.Context) error {
 	ev := make(chan int)
 	for _, dev := range devices {
 		dev := dev
-		eg.Go(func() error { return listen(ctx, dev, C.uint(*key), ev) })
+		eg.Go(func() error { return listen(ctx, dev, uint16(*key), ev) })
 	}
 	eg.Go(func() error { return handle(ctx, xdo, xdokey, ev) })
 
