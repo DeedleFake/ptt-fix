@@ -19,6 +19,8 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -46,8 +48,7 @@ func listen(ctx context.Context, device string, keycode C.uint, out chan<- int) 
 		return fmt.Errorf("syscall conn for %q: %w", device, err)
 	}
 
-	var lerr error
-	err = conn.Control(func(fd uintptr) {
+	err = control(conn, func(fd uintptr) error {
 		go func() {
 			<-ctx.Done()
 			syscall.Close(int(fd))
@@ -56,14 +57,15 @@ func listen(ctx context.Context, device string, keycode C.uint, out chan<- int) 
 		var dev *C.struct_libevdev
 		_, err := C.libevdev_new_from_fd(C.int(fd), &dev)
 		if err != nil {
-			lerr = fmt.Errorf("init libevdev for %q: %w", err)
-			return
+			log.Printf("ignoring %q because of error in libevdev init: %v", device, err)
+			return nil
 		}
 		defer C.libevdev_free(dev)
 
 		devname := C.GoString(C.libevdev_get_name(dev))
 		log.Printf(
-			"input device name: %q, bus: %x, vendor: %x, product: %x",
+			"initialized input device %q, name: %q, bus: %x, vendor: %x, product: %x",
+			device,
 			devname,
 			C.libevdev_get_id_bustype(dev),
 			C.libevdev_get_id_vendor(dev),
@@ -71,8 +73,8 @@ func listen(ctx context.Context, device string, keycode C.uint, out chan<- int) 
 		)
 
 		if C.libevdev_has_event_code(dev, C.EV_KEY, keycode) == 0 {
-			lerr = fmt.Errorf("device %q is not capable of sending requested key code", devname)
-			return
+			log.Printf("device %q (%v) is not capable of sending requested key code, ignoring", device, devname)
+			return nil
 		}
 
 		for {
@@ -81,8 +83,7 @@ func listen(ctx context.Context, device string, keycode C.uint, out chan<- int) 
 			switch rc {
 			case C.LIBEVDEV_READ_STATUS_SYNC, C.LIBEVDEV_READ_STATUS_SUCCESS, -C.EAGAIN:
 			default:
-				lerr = ctx.Err()
-				return
+				return ctx.Err()
 			}
 
 			if C.libevdev_event_is_code(&ev, C.EV_KEY, keycode) == 0 {
@@ -94,23 +95,20 @@ func listen(ctx context.Context, device string, keycode C.uint, out chan<- int) 
 			case 1:
 				select {
 				case <-ctx.Done():
-					lerr = ctx.Err()
-					return
+					return ctx.Err()
 				case out <- eventDown:
 				}
 			default:
 				select {
 				case <-ctx.Done():
-					lerr = ctx.Err()
-					return
+					return ctx.Err()
 				case out <- eventUp:
 				}
 			}
 		}
 	})
-	err = errors.Join(err, lerr)
 	if err != nil {
-		return fmt.Errorf("control %q: %w", device, err)
+		return fmt.Errorf("listen for events from %q: %w", device, err)
 	}
 
 	return nil
@@ -139,9 +137,27 @@ func handle(ctx context.Context, xdo *C.struct_xdo, key *C.char, ev <-chan int) 
 	}
 }
 
+func findDevices() ([]string, error) {
+	files, err := os.ReadDir("/dev/input")
+	if err != nil {
+		return nil, err
+	}
+
+	devices := make([]string, 0, len(files))
+	for _, f := range files {
+		if f.IsDir() || !strings.HasPrefix(f.Name(), "event") {
+			continue
+		}
+
+		devices = append(devices, filepath.Join("/dev/input", f.Name()))
+	}
+
+	return devices, nil
+}
+
 func run(ctx context.Context) error {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %v /dev/input/by-id/<device>...\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %v [/dev/input/by-id/<device>...]\n", os.Args[0])
 		fmt.Fprintln(os.Stderr, "Options:")
 		flag.PrintDefaults()
 	}
@@ -151,8 +167,15 @@ func run(ctx context.Context) error {
 
 	devices := flag.Args()
 	if len(devices) == 0 {
-		fmt.Fprintf(os.Stderr, "Usage: %v /dev/input/by-id/<device>...\n", os.Args[0])
-		os.Exit(2)
+		d, err := findDevices()
+		if err != nil {
+			return fmt.Errorf("find devices: %w", err)
+		}
+		if len(d) == 0 {
+			return errors.New("no devices found")
+		}
+
+		devices = d
 	}
 
 	xdo := C.xdo_new(nil)
