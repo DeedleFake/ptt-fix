@@ -32,11 +32,19 @@ const (
 	eventInvalid = iota
 	eventUp
 	eventDown
+	eventDone
 )
 
 func listen(ctx context.Context, device string, keycode uint16, out chan<- int) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	defer func() {
+		select {
+		case <-ctx.Done():
+		case out <- eventDone:
+		}
+	}()
 
 	d, err := evdev.Open(device)
 	if err != nil {
@@ -96,7 +104,7 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 	}
 }
 
-func handle(ctx context.Context, xdo *C.struct_xdo, key *C.char, ev <-chan int) error {
+func handle(ctx context.Context, xdo *C.struct_xdo, key *C.char, devs int, ev <-chan int) error {
 	defer C.xdo_free(xdo)
 
 	for {
@@ -112,6 +120,11 @@ func handle(ctx context.Context, xdo *C.struct_xdo, key *C.char, ev <-chan int) 
 			case eventDown:
 				C.xdo_send_keysequence_window_down(xdo, C.CURRENTWINDOW, key, 0)
 				slog.Info("activated")
+			case eventDone:
+				devs--
+				if devs == 0 {
+					return errors.New("all devices have become unavailable")
+				}
 			default:
 				return fmt.Errorf("invalid event: %v", ev)
 			}
@@ -175,7 +188,7 @@ func run(ctx context.Context) error {
 		dev := dev
 		eg.Go(func() error { return listen(ctx, dev, uint16(*key), ev) })
 	}
-	eg.Go(func() error { return handle(ctx, xdo, xdokey, ev) })
+	eg.Go(func() error { return handle(ctx, xdo, xdokey, len(devices), ev) })
 
 	err := eg.Wait()
 	if (err != nil) && !errors.Is(err, context.Canceled) {
