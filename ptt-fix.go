@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -41,6 +42,8 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	slog := slog.With("path", device)
+
 	defer func() {
 		select {
 		case <-ctx.Done():
@@ -54,6 +57,8 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 	}
 	defer d.Close()
 
+	slog = slog.With("name", d.Name)
+
 	go func() {
 		<-ctx.Done()
 		d.Close()
@@ -61,15 +66,13 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 
 	slog.Info(
 		"initialized device",
-		"path", device,
-		"name", d.Name,
 		"bus", d.BusType,
 		"vendor", d.Vendor,
 		"product", d.Product,
 	)
 
 	if !d.HasEventCode(C.EV_KEY, keycode) {
-		slog.Info("ignoring device", "path", device, "name", d.Name, "reason", "incapable of sending requested key code")
+		slog.Info("ignoring device", "reason", "incapable of sending requested key code")
 		return nil
 	}
 
@@ -80,15 +83,15 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 				return err
 			}
 			if errors.Is(err, fs.ErrClosed) {
-				slog.Warn("device closed while reading", "device", device, "name", d.Name)
+				slog.Warn("device closed while reading")
 				return nil
 			}
 			if errno := *new(unix.Errno); errors.As(err, &errno) && !errno.Temporary() {
-				slog.Warn("device disappeared while reading", "device", device, "name", d.Name, slog.ErrorKey, err)
+				slog.Warn("device disappeared while reading", err)
 				return nil
 			}
 
-			slog.Warn("read event", "device", device, "name", d.Name, slog.ErrorKey, err)
+			slog.Warn("read event", err)
 			continue
 		}
 
@@ -126,10 +129,10 @@ func handle(ctx context.Context, xdo *C.struct_xdo, key *C.char, devs int, ev <-
 			switch ev {
 			case eventUp:
 				C.xdo_send_keysequence_window_up(xdo, C.CURRENTWINDOW, key, 0)
-				slog.Info("deactivated")
+				slog.Debug("deactivated")
 			case eventDown:
 				C.xdo_send_keysequence_window_down(xdo, C.CURRENTWINDOW, key, 0)
-				slog.Info("activated")
+				slog.Debug("activated")
 			case eventDone:
 				devs--
 				if devs == 0 {
@@ -209,6 +212,16 @@ func run(ctx context.Context) error {
 }
 
 func main() {
+	var defaultLevel slog.LevelVar
+	slog.SetDefault(slog.New(slog.HandlerOptions{
+		Level: &defaultLevel,
+	}.NewTextHandler(os.Stderr)))
+	if ll, ok := os.LookupEnv("LOG_LEVEL"); ok {
+		if v, err := strconv.ParseInt(ll, 10, 0); err == nil {
+			defaultLevel.Set(slog.Level((4 - v - 1) * 4))
+		}
+	}
+
 	if addr := os.Getenv("PPROF_ADDR"); addr != "" {
 		go func() { slog.Error("start pprof HTTP server", http.ListenAndServe(addr, nil)) }()
 	}
