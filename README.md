@@ -6,13 +6,13 @@ This program provides a simple workaround to the problem of push-to-talk in Wayl
 Installation
 ------------
 
-To install, simply run
+If you are on Arch Linux, ptt-fix is available from the AUR as [`ptt-fix`][aur].
+
+To install manually, you will need `libxdo` installed. Then, simply run
 
 ```bash
 $ go install deedles.dev/ptt-fix@latest
 ```
-
-ptt-fix is also available from the AUR as [`ptt-fix`][aur].
 
 Usage
 -----
