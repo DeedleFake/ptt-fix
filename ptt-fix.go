@@ -1,9 +1,9 @@
 package main
 
 /*
-#cgo pkg-config: libevdev
-#cgo LDFLAGS: -lxdo
+#cgo pkg-config: libevdev libxdo
 
+#include <malloc.h>
 #include <errno.h>
 #include <libevdev/libevdev.h>
 #include <xdo.h>
@@ -12,21 +12,16 @@ import "C"
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"unsafe"
 
 	"golang.org/x/sync/errgroup"
 )
-
-const (
-	KeyCode   = C.KEY_COMMA
-	XKeyEvent = "comma"
-)
-
-var cxkeyEvent = C.CString(XKeyEvent)
 
 const (
 	eventInvalid = iota
@@ -34,7 +29,7 @@ const (
 	eventDown
 )
 
-func listen(ctx context.Context, device string, out chan<- int) error {
+func listen(ctx context.Context, device string, keycode C.uint, out chan<- int) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -73,8 +68,8 @@ func listen(ctx context.Context, device string, out chan<- int) error {
 			C.libevdev_get_id_product(dev),
 		)
 
-		if C.libevdev_has_event_code(dev, C.EV_KEY, KeyCode) == 0 {
-			lerr = fmt.Errorf("device %q is not capable of sending key code", devname)
+		if C.libevdev_has_event_code(dev, C.EV_KEY, keycode) == 0 {
+			lerr = fmt.Errorf("device %q is not capable of sending requested key code", devname)
 			return
 		}
 
@@ -88,7 +83,7 @@ func listen(ctx context.Context, device string, out chan<- int) error {
 				return
 			}
 
-			if (ev._type != C.EV_KEY) || (ev.code != KeyCode) {
+			if C.libevdev_event_is_code(&ev, C.EV_KEY, keycode) == 0 {
 				continue
 			}
 
@@ -119,11 +114,7 @@ func listen(ctx context.Context, device string, out chan<- int) error {
 	return nil
 }
 
-func handle(ctx context.Context, ev <-chan int) error {
-	xdo := C.xdo_new(nil)
-	if xdo == nil {
-		return errors.New("initialize xdo")
-	}
+func handle(ctx context.Context, xdo *C.struct_xdo, key *C.char, ev <-chan int) error {
 	defer C.xdo_free(xdo)
 
 	for {
@@ -134,9 +125,11 @@ func handle(ctx context.Context, ev <-chan int) error {
 		case ev := <-ev:
 			switch ev {
 			case eventUp:
-				C.xdo_send_keysequence_window_up(xdo, C.CURRENTWINDOW, cxkeyEvent, 0)
+				C.xdo_send_keysequence_window_up(xdo, C.CURRENTWINDOW, key, 0)
+				log.Printf("deactivated")
 			case eventDown:
-				C.xdo_send_keysequence_window_down(xdo, C.CURRENTWINDOW, cxkeyEvent, 0)
+				C.xdo_send_keysequence_window_down(xdo, C.CURRENTWINDOW, key, 0)
+				log.Println("activated")
 			default:
 				return fmt.Errorf("invalid event: %v", ev)
 			}
@@ -145,20 +138,37 @@ func handle(ctx context.Context, ev <-chan int) error {
 }
 
 func run(ctx context.Context) error {
-	devices := os.Args[1:]
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %v /dev/input/by-id/<device>...\n", os.Args[0])
+		fmt.Fprintln(os.Stderr, "Options:")
+		flag.PrintDefaults()
+	}
+	key := flag.Uint("key", 56, "keycode to watch for")
+	sym := flag.String("sym", "Alt_L", "key symbol to send to X")
+	flag.Parse()
+
+	devices := flag.Args()
 	if len(devices) == 0 {
 		fmt.Fprintf(os.Stderr, "Usage: %v /dev/input/by-id/<device>...\n", os.Args[0])
 		os.Exit(2)
 	}
+
+	xdo := C.xdo_new(nil)
+	if xdo == nil {
+		return errors.New("initialize xdo")
+	}
+
+	xdokey := C.CString(*sym)
+	defer C.free(unsafe.Pointer(xdokey))
 
 	eg, ctx := errgroup.WithContext(ctx)
 
 	ev := make(chan int)
 	for _, dev := range devices {
 		dev := dev
-		eg.Go(func() error { return listen(ctx, dev, ev) })
+		eg.Go(func() error { return listen(ctx, dev, C.uint(*key), ev) })
 	}
-	eg.Go(func() error { return handle(ctx, ev) })
+	eg.Go(func() error { return handle(ctx, xdo, xdokey, ev) })
 
 	err := eg.Wait()
 	if (err != nil) && !errors.Is(err, context.Canceled) {
