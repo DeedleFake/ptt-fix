@@ -21,7 +21,7 @@ First, determine the keycode that represents the key that you'd like to press to
 
 Once you've done that, find the symbol name that represents the key that Discord is set up to use for push-to-talk. This does not have to be the same key as the one in the first step, but it probably should be for simplicity's sake. The symbol can be found in `/usr/include/xkbcommon/xkbcommon-keysyms.h` as the part of the macro name after `XKB_KEY_`. For example, the minus key is `XKB_KEY_minus`, so the symbol name is `minus`.
 
-Next, you may determine the path to the input devices you'd like to use. This is optional. If you do not specify a device to use, any of the event devices listed in `/dev/input` that support the requested keycode will be used. The below example assumes that your keyboard is at `/dev/input/by-id/fake-kbd`, but it is quite probably different on your system. It is easiest to look in the `/dev/input/by-id` directory for something that looks likely to be your keyboard. It will probably end with `-kbd`.
+Next, you may determine the path to the input devices you'd like to use. This is optional. If you do not specify a device to use, all of the event devices listed in `/dev/input` that support the requested keycode will be used. The below example assumes that your keyboard is at `/dev/input/by-id/fake-kbd`, but it is quite probably different on your system. It is easiest to look in the `/dev/input/by-id` directory for something that looks likely to be your keyboard. It will probably end with `-kbd`.
 
 Finally, actually run the program, passing it the information that you determined in the above steps:
 
