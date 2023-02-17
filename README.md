@@ -12,6 +12,8 @@ To install, simply run
 $ go install deedles.dev/ptt-fix@latest
 ```
 
+ptt-fix is also available from the AUR as [`ptt-fix`][aur].
+
 Usage
 -----
 
@@ -30,3 +32,4 @@ ptt-fix -key 12 -sym minus /dev/input/event7
 And that's it. As long as the program is running, the minus key being pressed on your keyboard will be forwarded to X programs that are listening for it, such as Discord. If you'd like to listen to multiple devices, for example because you have a keyboard button mapped to your mouse and you want both devices to work, just list all of them when running the program.
 
 [rush]: https://github.com/Rush/wayland-push-to-talk-fix
+[aur]: https://aur.archlinux.org/packages/ptt-fix
