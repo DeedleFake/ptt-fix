@@ -38,11 +38,13 @@ const (
 	eventDone
 )
 
+func slogErr(err error) slog.Attr {
+	return slog.Any(slog.ErrorKey, err)
+}
+
 func listen(ctx context.Context, device string, keycode uint16, out chan<- int) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-
-	slog := slog.With("path", device)
 
 	defer func() {
 		select {
@@ -57,7 +59,11 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 	}
 	defer d.Close()
 
-	slog = slog.With("name", d.Name)
+	slog := slog.With(slog.Group(
+		"device",
+		slog.String("path", device),
+		slog.String("name", d.Name),
+	))
 
 	go func() {
 		<-ctx.Done()
@@ -87,11 +93,11 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 				return nil
 			}
 			if errno := *new(unix.Errno); errors.As(err, &errno) && !errno.Temporary() {
-				slog.Warn("device disappeared while reading", err)
+				slog.Warn("device disappeared while reading", slogErr(err))
 				return nil
 			}
 
-			slog.Warn("read event", err)
+			slog.Warn("read event", slogErr(err))
 			continue
 		}
 
