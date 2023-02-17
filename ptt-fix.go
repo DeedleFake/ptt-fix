@@ -15,6 +15,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -76,6 +77,10 @@ func listen(ctx context.Context, device string, keycode uint16, out chan<- int) 
 		if err != nil {
 			if ctx.Err() != nil {
 				return err
+			}
+			if errors.Is(err, fs.ErrClosed) {
+				slog.Warn("device closed while reading", "device", device, "name", d.Name)
+				return nil
 			}
 
 			slog.Warn("read event", "device", device, "name", d.Name, slog.ErrorKey, err)
