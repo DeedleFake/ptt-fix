@@ -15,20 +15,17 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
+	"time"
 	"unsafe"
 
-	"deedles.dev/ptt-fix/internal/evdev"
 	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
-	"golang.org/x/sys/unix"
 )
 
 const (
@@ -42,85 +39,24 @@ func slogErr(err error) slog.Attr {
 	return slog.Any(slog.ErrorKey, err)
 }
 
-func listen(ctx context.Context, device string, keycode uint16, out chan<- int) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+type slogCtx struct{}
 
-	defer func() {
-		select {
-		case <-ctx.Done():
-		case out <- eventDone:
-		}
-	}()
-
-	d, err := evdev.Open(device)
-	if err != nil {
-		panic(err)
-	}
-	defer d.Close()
-
-	slog := slog.With("device", device)
-
-	go func() {
-		<-ctx.Done()
-		d.Close()
-	}()
-
-	slog.Info(
-		"initialized device",
-		"name", d.Name,
-		"bus", d.BusType,
-		"vendor", d.Vendor,
-		"product", d.Product,
-	)
-
-	if !d.HasEventCode(C.EV_KEY, keycode) {
-		slog.Info("ignoring device", "reason", "incapable of sending requested key code")
-		return nil
-	}
-
-	for {
-		ev, err := d.NextEvent()
-		if err != nil {
-			if ctx.Err() != nil {
-				return err
-			}
-			if errors.Is(err, fs.ErrClosed) {
-				slog.Warn("device closed while reading")
-				return nil
-			}
-			if errno := *new(unix.Errno); errors.As(err, &errno) && !errno.Temporary() {
-				slog.Warn("device disappeared while reading", slogErr(err))
-				return nil
-			}
-
-			slog.Warn("read event", slogErr(err))
-			continue
-		}
-
-		if !ev.Is(C.EV_KEY, keycode) {
-			continue
-		}
-
-		switch ev.Value {
-		case 2:
-		case 1:
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case out <- eventDown:
-			}
-		default:
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case out <- eventUp:
-			}
-		}
-	}
+func WithLogger(ctx context.Context, logger *slog.Logger) context.Context {
+	return context.WithValue(ctx, slogCtx{}, logger)
 }
 
-func handle(ctx context.Context, xdo *C.struct_xdo, key *C.char, devs int, ev <-chan int) error {
+func Logger(ctx context.Context) *slog.Logger {
+	logger, _ := ctx.Value(slogCtx{}).(*slog.Logger)
+	return logger
+}
+
+func handle(ctx context.Context, key *C.char, devs int, ev <-chan int) error {
+	logger := Logger(ctx)
+
+	xdo := C.xdo_new(nil)
+	if xdo == nil {
+		return errors.New("xdo initialization failed")
+	}
 	defer C.xdo_free(xdo)
 
 	for {
@@ -132,10 +68,10 @@ func handle(ctx context.Context, xdo *C.struct_xdo, key *C.char, devs int, ev <-
 			switch ev {
 			case eventUp:
 				C.xdo_send_keysequence_window_up(xdo, C.CURRENTWINDOW, key, 0)
-				slog.Debug("deactivated")
+				logger.Debug("deactivated")
 			case eventDown:
 				C.xdo_send_keysequence_window_down(xdo, C.CURRENTWINDOW, key, 0)
-				slog.Debug("activated")
+				logger.Debug("activated")
 			case eventDone:
 				devs--
 				if devs == 0 {
@@ -174,6 +110,7 @@ func run(ctx context.Context) error {
 	}
 	key := flag.Uint("key", 56, "keycode to watch for")
 	sym := flag.String("sym", "Alt_L", "key symbol to send to X")
+	retry := flag.Duration("retry", 10*time.Second, "time to wait before retrying devices that disappear (0 to disable)")
 	flag.Parse()
 
 	devices := flag.Args()
@@ -189,11 +126,6 @@ func run(ctx context.Context) error {
 		devices = d
 	}
 
-	xdo := C.xdo_new(nil)
-	if xdo == nil {
-		return errors.New("initialize xdo")
-	}
-
 	xdokey := C.CString(*sym)
 	defer C.free(unsafe.Pointer(xdokey))
 
@@ -202,9 +134,19 @@ func run(ctx context.Context) error {
 	ev := make(chan int)
 	for _, dev := range devices {
 		dev := dev
-		eg.Go(func() error { return listen(ctx, dev, uint16(*key), ev) })
+		eg.Go(func() error {
+			return Listener{
+				Device:  dev,
+				Keycode: uint16(*key),
+				C:       ev,
+				Retry:   *retry,
+			}.Run(ctx)
+		})
 	}
-	eg.Go(func() error { return handle(ctx, xdo, xdokey, len(devices), ev) })
+
+	eg.Go(func() error {
+		return handle(ctx, xdokey, len(devices), ev)
+	})
 
 	err := eg.Wait()
 	if (err != nil) && !errors.Is(err, context.Canceled) {
@@ -216,25 +158,23 @@ func run(ctx context.Context) error {
 
 func main() {
 	var defaultLevel slog.LevelVar
-	slog.SetDefault(slog.New(slog.HandlerOptions{
+	logger := slog.New(slog.HandlerOptions{
 		Level: &defaultLevel,
-	}.NewTextHandler(os.Stderr)))
-	if ll, ok := os.LookupEnv("LOG_LEVEL"); ok {
-		if v, err := strconv.ParseInt(ll, 10, 0); err == nil {
-			defaultLevel.Set(slog.Level((4 - v - 1) * 4))
-		}
-	}
+	}.NewTextHandler(os.Stderr))
+	defaultLevel.Set(slog.LevelDebug)
 
 	if addr := os.Getenv("PPROF_ADDR"); addr != "" {
-		go func() { slog.Error("start pprof HTTP server", http.ListenAndServe(addr, nil)) }()
+		go func() { logger.Error("start pprof HTTP server", http.ListenAndServe(addr, nil)) }()
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
+	ctx = WithLogger(ctx, logger)
+
 	err := run(ctx)
 	if err != nil {
-		slog.Error("fatal", err)
+		logger.Error("fatal", err)
 		os.Exit(1)
 	}
 }
