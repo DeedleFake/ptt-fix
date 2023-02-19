@@ -1,15 +1,5 @@
 package main
 
-/*
-#cgo pkg-config: libxdo
-
-#include <malloc.h>
-#include <errno.h>
-#include <linux/input.h>
-#include <xdo.h>
-*/
-import "C"
-
 import (
 	"context"
 	"errors"
@@ -21,8 +11,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"time"
-	"unsafe"
 
+	"deedles.dev/ptt-fix/internal/xdo"
 	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
 )
@@ -49,14 +39,13 @@ func Logger(ctx context.Context) *slog.Logger {
 	return logger
 }
 
-func handle(ctx context.Context, key *C.char, devs int, ev <-chan int) error {
+func handle(ctx context.Context, key string, devs int, ev <-chan int) error {
 	logger := Logger(ctx)
 
-	xdo := C.xdo_new(nil)
-	if xdo == nil {
+	do, ok := xdo.New()
+	if !ok {
 		return errors.New("xdo initialization failed")
 	}
-	defer C.xdo_free(xdo)
 
 	for {
 		select {
@@ -66,10 +55,10 @@ func handle(ctx context.Context, key *C.char, devs int, ev <-chan int) error {
 		case ev := <-ev:
 			switch ev {
 			case eventUp:
-				C.xdo_send_keysequence_window_up(xdo, C.CURRENTWINDOW, key, 0)
+				do.SendKeysequenceWindowUp(xdo.CurrentWindow, key, 0)
 				logger.Debug("deactivated")
 			case eventDown:
-				C.xdo_send_keysequence_window_down(xdo, C.CURRENTWINDOW, key, 0)
+				do.SendKeysequenceWindowDown(xdo.CurrentWindow, key, 0)
 				logger.Debug("activated")
 			case eventDone:
 				devs--
@@ -127,9 +116,6 @@ func run(ctx context.Context) error {
 		devices = d
 	}
 
-	xdokey := C.CString(*sym)
-	defer C.free(unsafe.Pointer(xdokey))
-
 	eg, ctx := errgroup.WithContext(ctx)
 
 	ev := make(chan int)
@@ -146,7 +132,7 @@ func run(ctx context.Context) error {
 	}
 
 	eg.Go(func() error {
-		return handle(ctx, xdokey, len(devices), ev)
+		return handle(ctx, *sym, len(devices), ev)
 	})
 
 	err := eg.Wait()
