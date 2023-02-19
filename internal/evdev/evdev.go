@@ -57,14 +57,14 @@ func (d *Device) init() error {
 	d.bits = bits[:]
 
 	var bitsREL [(relCount + wordbits - 1) / 8]byte
-	err = cctl(conn, uintptr(eviocgbit(evRel, uintptr(len(bitsREL)))), &bitsREL[0])
+	err = cctl(conn, uintptr(eviocgbit(EvRel, uintptr(len(bitsREL)))), &bitsREL[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsREL = bitsREL[:]
 
 	var bitsABS [(absCount + wordbits - 1) / 8]byte
-	err = cctl(conn, uintptr(eviocgbit(evAbs, uintptr(len(bitsABS)))), &bitsABS[0])
+	err = cctl(conn, uintptr(eviocgbit(EvAbs, uintptr(len(bitsABS)))), &bitsABS[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
@@ -78,21 +78,21 @@ func (d *Device) init() error {
 	d.bitsLED = bitsLED[:]
 
 	var bitsKEY [(keyCount + wordbits - 1) / 8]byte
-	err = cctl(conn, uintptr(eviocgbit(evKey, uintptr(len(bitsKEY)))), &bitsKEY[0])
+	err = cctl(conn, uintptr(eviocgbit(EvKey, uintptr(len(bitsKEY)))), &bitsKEY[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsKEY = bitsKEY[:]
 
 	var bitsSW [(swCount + wordbits - 1) / 8]byte
-	err = cctl(conn, uintptr(eviocgbit(evSw, uintptr(len(bitsSW)))), &bitsSW[0])
+	err = cctl(conn, uintptr(eviocgbit(EvSw, uintptr(len(bitsSW)))), &bitsSW[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsSW = bitsSW[:]
 
 	var bitsMSC [(mscCount + wordbits - 1) / 8]byte
-	err = cctl(conn, uintptr(eviocgbit(evMsc, uintptr(len(bitsMSC)))), &bitsMSC[0])
+	err = cctl(conn, uintptr(eviocgbit(EvMsc, uintptr(len(bitsMSC)))), &bitsMSC[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
@@ -121,15 +121,15 @@ func (d *Device) Close() error {
 
 func (d *Device) typeCodes(t uint16) []byte {
 	switch t {
-	case evKey:
+	case EvKey:
 		return d.bitsKEY
-	case evRel:
+	case EvRel:
 		return d.bitsREL
-	case evAbs:
+	case EvAbs:
 		return d.bitsABS
-	case evMsc:
+	case EvMsc:
 		return d.bitsMSC
-	case evSw:
+	case EvSw:
 		return d.bitsSW
 	case evLed:
 		return d.bitsLED

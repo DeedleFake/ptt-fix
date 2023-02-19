@@ -61,12 +61,12 @@ const (
 )
 
 const (
-	evSyn = iota
-	evKey
-	evRel
-	evAbs
-	evMsc
-	evSw
+	EvSyn = iota
+	EvKey
+	EvRel
+	EvAbs
+	EvMsc
+	EvSw
 )
 
 const (
