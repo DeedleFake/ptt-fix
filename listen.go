@@ -75,9 +75,9 @@ func (lis *Listener) listen(ctx context.Context) (retry bool, err error) {
 	logger.Info(
 		"initialized device",
 		"name", d.Name,
-		"bus", d.BusType,
-		"vendor", d.Vendor,
-		"product", d.Product,
+		"bus", d.ID.BusType,
+		"vendor", d.ID.Vendor,
+		"product", d.ID.Product,
 	)
 
 	if !d.HasEventCode(C.EV_KEY, lis.Keycode) {

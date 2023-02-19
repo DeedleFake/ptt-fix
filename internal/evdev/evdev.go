@@ -1,18 +1,5 @@
 package evdev
 
-/*
-#include <linux/input.h>
-
-static inline unsigned int wrap_EVIOCGNAME(int len) {
-	return EVIOCGNAME(len);
-}
-
-static inline unsigned int wrap_EVIOCGBIT(int min, int max) {
-	return EVIOCGBIT(min, max);
-}
-*/
-import "C"
-
 import (
 	"errors"
 	"fmt"
@@ -24,13 +11,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const longBits = unsafe.Sizeof(C.long(0))
-
 type Device struct {
 	file *os.File
 
-	Name                              string
-	BusType, Vendor, Product, Version uint16
+	Name string
+	ID   InputID
 
 	bits                                                                 []byte
 	bitsREL, bitsABS, bitsLED, bitsKEY, bitsSW, bitsMSC, bitsFF, bitsSND []byte
@@ -53,80 +38,75 @@ func (d *Device) init() error {
 	}
 
 	var buf [256]byte
-	err = cctl(conn, uintptr(C.wrap_EVIOCGNAME(256)), &buf[0])
+	err = cctl(conn, eviocgname(uintptr(len(buf))), &buf[0])
 	if err != nil {
 		return fmt.Errorf("get device name: %w", err)
 	}
 	d.Name = fromNTString(buf[:])
 
-	var id C.struct_input_id
-	err = cctl(conn, C.EVIOCGID, &id)
+	err = cctl(conn, eviocgid, &d.ID)
 	if err != nil {
 		return fmt.Errorf("get device info: %w", err)
 	}
-	d.BusType = uint16(id.bustype)
-	d.Vendor = uint16(id.vendor)
-	d.Product = uint16(id.product)
-	d.Version = uint16(id.version)
 
 	var bits [0x1F]byte
-	err = cctl(conn, uintptr(C.wrap_EVIOCGBIT(0, 0x1F)), &bits[0])
+	err = cctl(conn, eviocgbit(0, uintptr(len(bits))), &bits[0])
 	if err != nil {
 		return fmt.Errorf("get device capabilities: %w", err)
 	}
 	d.bits = bits[:]
 
-	var bitsREL [(C.REL_CNT + longBits - 1) / 8]byte
-	err = cctl(conn, uintptr(C.wrap_EVIOCGBIT(C.EV_REL, C.int(len(bitsREL)))), &bitsREL[0])
+	var bitsREL [(relCount + longBits - 1) / 8]byte
+	err = cctl(conn, uintptr(eviocgbit(evRel, uintptr(len(bitsREL)))), &bitsREL[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsREL = bitsREL[:]
 
-	var bitsABS [(C.ABS_CNT + longBits - 1) / 8]byte
-	err = cctl(conn, uintptr(C.wrap_EVIOCGBIT(C.EV_ABS, C.int(len(bitsABS)))), &bitsABS[0])
+	var bitsABS [(absCount + longBits - 1) / 8]byte
+	err = cctl(conn, uintptr(eviocgbit(evAbs, uintptr(len(bitsABS)))), &bitsABS[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsABS = bitsABS[:]
 
-	var bitsLED [(C.LED_CNT + longBits - 1) / 8]byte
-	err = cctl(conn, uintptr(C.wrap_EVIOCGBIT(C.EV_LED, C.int(len(bitsLED)))), &bitsLED[0])
+	var bitsLED [(ledCount + longBits - 1) / 8]byte
+	err = cctl(conn, uintptr(eviocgbit(evLed, uintptr(len(bitsLED)))), &bitsLED[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsLED = bitsLED[:]
 
-	var bitsKEY [(C.KEY_CNT + longBits - 1) / 8]byte
-	err = cctl(conn, uintptr(C.wrap_EVIOCGBIT(C.EV_KEY, C.int(len(bitsKEY)))), &bitsKEY[0])
+	var bitsKEY [(keyCount + longBits - 1) / 8]byte
+	err = cctl(conn, uintptr(eviocgbit(evKey, uintptr(len(bitsKEY)))), &bitsKEY[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsKEY = bitsKEY[:]
 
-	var bitsSW [(C.SW_CNT + longBits - 1) / 8]byte
-	err = cctl(conn, uintptr(C.wrap_EVIOCGBIT(C.EV_SW, C.int(len(bitsSW)))), &bitsSW[0])
+	var bitsSW [(swCount + longBits - 1) / 8]byte
+	err = cctl(conn, uintptr(eviocgbit(evSw, uintptr(len(bitsSW)))), &bitsSW[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsSW = bitsSW[:]
 
-	var bitsMSC [(C.MSC_CNT + longBits - 1) / 8]byte
-	err = cctl(conn, uintptr(C.wrap_EVIOCGBIT(C.EV_MSC, C.int(len(bitsMSC)))), &bitsMSC[0])
+	var bitsMSC [(mscCount + longBits - 1) / 8]byte
+	err = cctl(conn, uintptr(eviocgbit(evMsc, uintptr(len(bitsMSC)))), &bitsMSC[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsMSC = bitsMSC[:]
 
-	var bitsFF [(C.FF_CNT + longBits - 1) / 8]byte
-	err = cctl(conn, uintptr(C.wrap_EVIOCGBIT(C.EV_FF, C.int(len(bitsFF)))), &bitsFF[0])
+	var bitsFF [(ffCount + longBits - 1) / 8]byte
+	err = cctl(conn, uintptr(eviocgbit(evFf, uintptr(len(bitsFF)))), &bitsFF[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsFF = bitsFF[:]
 
-	var bitsSND [(C.SND_CNT + longBits - 1) / 8]byte
-	err = cctl(conn, uintptr(C.wrap_EVIOCGBIT(C.EV_SND, C.int(len(bitsSND)))), &bitsSND[0])
+	var bitsSND [(sndCount + longBits - 1) / 8]byte
+	err = cctl(conn, uintptr(eviocgbit(evSnd, uintptr(len(bitsSND)))), &bitsSND[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
@@ -141,21 +121,21 @@ func (d *Device) Close() error {
 
 func (d *Device) typeCodes(t uint16) []byte {
 	switch t {
-	case C.EV_KEY:
+	case evKey:
 		return d.bitsKEY
-	case C.EV_REL:
+	case evRel:
 		return d.bitsREL
-	case C.EV_ABS:
+	case evAbs:
 		return d.bitsABS
-	case C.EV_MSC:
+	case evMsc:
 		return d.bitsMSC
-	case C.EV_SW:
+	case evSw:
 		return d.bitsSW
-	case C.EV_LED:
+	case evLed:
 		return d.bitsLED
-	case C.EV_SND:
+	case evSnd:
 		return d.bitsSND
-	case C.EV_FF:
+	case evFf:
 		return d.bitsFF
 	default:
 		return nil
@@ -192,6 +172,22 @@ type InputEvent struct {
 
 func (ev InputEvent) Is(t, code uint16) bool {
 	return (ev.Type == t) && (ev.Code == code)
+}
+
+type InputID struct {
+	BusType uint16
+	Vendor  uint16
+	Product uint16
+	Version uint16
+}
+
+type inputAbsInfo struct {
+	Value      int32
+	Minimum    int32
+	Maximum    int32
+	Fuzz       int32
+	Flat       int32
+	Resolution int32
 }
 
 func control(conn syscall.RawConn, f func(uintptr) error) error {
