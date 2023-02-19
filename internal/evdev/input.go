@@ -3,6 +3,8 @@ package evdev
 import "unsafe"
 
 const (
+	wordbits = unsafe.Sizeof(uintptr(0)) * 8
+
 	iocNRShift   = 0
 	iocTypeShift = iocNRShift + iocNRBits
 	iocSizeShift = iocTypeShift + iocTypeBits
