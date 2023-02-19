@@ -23,6 +23,9 @@ type Listener struct {
 }
 
 func (lis Listener) Run(ctx context.Context) error {
+	logger := Logger(ctx).With("device", lis.Device)
+	ctx = WithLogger(ctx, logger)
+
 	defer func() {
 		select {
 		case <-ctx.Done():
@@ -31,26 +34,22 @@ func (lis Listener) Run(ctx context.Context) error {
 		}
 	}()
 
-	logger := Logger(ctx)
-	logger = logger.With("device", lis.Device)
-
 	for {
-		err := lis.listen(WithLogger(ctx, logger))
-		if (lis.Retry > 0) && isRetry(err) {
-			logger.Info("waiting before retrying", "duration", lis.Retry)
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(lis.Retry):
-				continue
-			}
+		retry, err := lis.listen(ctx)
+		if (lis.Retry <= 0) || !retry {
+			return err
 		}
 
-		return err
+		logger.Info("waiting before retrying", "duration", lis.Retry, slogErr(err))
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(lis.Retry):
+		}
 	}
 }
 
-func (lis *Listener) listen(ctx context.Context) error {
+func (lis *Listener) listen(ctx context.Context) (retry bool, err error) {
 	logger := Logger(ctx)
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -58,7 +57,13 @@ func (lis *Listener) listen(ctx context.Context) error {
 
 	d, err := evdev.Open(lis.Device)
 	if err != nil {
-		return retryError{err}
+		retry := isTemporary(err) || errors.Is(err, fs.ErrNotExist)
+		if retry {
+			return true, err
+		}
+
+		logger.Warn("ignoring device", "reason", "failed to open", slogErr(err))
+		return false, nil
 	}
 	defer d.Close()
 
@@ -77,22 +82,22 @@ func (lis *Listener) listen(ctx context.Context) error {
 
 	if !d.HasEventCode(C.EV_KEY, lis.Keycode) {
 		logger.Info("ignoring device", "reason", "incapable of sending requested key code")
-		return nil
+		return false, nil
 	}
 
 	for {
 		ev, err := d.NextEvent()
 		if err != nil {
 			if ctx.Err() != nil {
-				return err
+				return false, err
 			}
 			if errors.Is(err, fs.ErrClosed) {
 				logger.Warn("device closed while reading")
-				return nil
+				return false, nil
 			}
-			if errno := *new(unix.Errno); errors.As(err, &errno) && !errno.Temporary() {
+			if isTemporary(err) {
 				logger.Warn("device disappeared while reading", slogErr(err))
-				return retryError{err}
+				return true, err
 			}
 
 			logger.Warn("read event", slogErr(err))
@@ -108,32 +113,20 @@ func (lis *Listener) listen(ctx context.Context) error {
 		case 1:
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return false, ctx.Err()
 			case lis.C <- eventDown:
 			}
 		default:
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return false, ctx.Err()
 			case lis.C <- eventUp:
 			}
 		}
 	}
 }
 
-type retryError struct {
-	Err error
-}
-
-func (err retryError) Error() string {
-	return err.Err.Error()
-}
-
-func (err retryError) Unwrap() error {
-	return err.Err
-}
-
-func isRetry(err error) bool {
-	var r retryError
-	return errors.As(err, &r)
+func isTemporary(err error) bool {
+	var errno unix.Errno
+	return errors.As(err, &errno) && errno.Temporary()
 }
