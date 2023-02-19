@@ -1,10 +1,5 @@
 package main
 
-/*
-#include <linux/input.h>
-*/
-import "C"
-
 import (
 	"context"
 	"errors"
@@ -80,7 +75,7 @@ func (lis *Listener) listen(ctx context.Context) (retry bool, err error) {
 		"product", d.ID.Product,
 	)
 
-	if !d.HasEventCode(C.EV_KEY, lis.Keycode) {
+	if !d.HasEventCode(evdev.EvKey, lis.Keycode) {
 		logger.Info("ignoring device", "reason", "incapable of sending requested key code")
 		return false, nil
 	}
@@ -104,7 +99,7 @@ func (lis *Listener) listen(ctx context.Context) (retry bool, err error) {
 			continue
 		}
 
-		if !ev.Is(C.EV_KEY, lis.Keycode) {
+		if !ev.Is(evdev.EvKey, lis.Keycode) {
 			continue
 		}
 
