@@ -20,7 +20,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"time"
 	"unsafe"
 
@@ -85,18 +84,20 @@ func handle(ctx context.Context, key *C.char, devs int, ev <-chan int) error {
 }
 
 func findDevices() ([]string, error) {
-	files, err := os.ReadDir("/dev/input")
+	const dir = "/dev/input/by-id"
+
+	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
 
 	devices := make([]string, 0, len(files))
 	for _, f := range files {
-		if f.IsDir() || !strings.HasPrefix(f.Name(), "event") {
+		if f.IsDir() {
 			continue
 		}
 
-		devices = append(devices, filepath.Join("/dev/input", f.Name()))
+		devices = append(devices, filepath.Join(dir, f.Name()))
 	}
 
 	return devices, nil
