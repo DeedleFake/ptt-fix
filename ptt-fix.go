@@ -21,7 +21,6 @@ const (
 	eventInvalid = iota
 	eventUp
 	eventDown
-	eventDone
 )
 
 func slogErr(err error) slog.Attr {
@@ -39,7 +38,7 @@ func Logger(ctx context.Context) *slog.Logger {
 	return logger
 }
 
-func handle(ctx context.Context, key string, devs int, ev <-chan int) error {
+func handle(ctx context.Context, key string, ev <-chan int) error {
 	logger := Logger(ctx)
 
 	do, ok := xdo.New()
@@ -50,7 +49,7 @@ func handle(ctx context.Context, key string, devs int, ev <-chan int) error {
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 
 		case ev := <-ev:
 			switch ev {
@@ -60,11 +59,6 @@ func handle(ctx context.Context, key string, devs int, ev <-chan int) error {
 			case eventDown:
 				do.SendKeysequenceWindowDown(xdo.CurrentWindow, key, 0)
 				logger.Debug("activated")
-			case eventDone:
-				devs--
-				if devs == 0 {
-					return errors.New("all devices have become unavailable")
-				}
 			default:
 				return fmt.Errorf("invalid event: %v", ev)
 			}
@@ -118,10 +112,11 @@ func run(ctx context.Context) error {
 
 	eg, ctx := errgroup.WithContext(ctx)
 
+	var liseg errgroup.Group
 	ev := make(chan int)
 	for _, dev := range devices {
 		dev := dev
-		eg.Go(func() error {
+		liseg.Go(func() error {
 			return Listener{
 				Device:  dev,
 				Keycode: uint16(*key),
@@ -132,7 +127,14 @@ func run(ctx context.Context) error {
 	}
 
 	eg.Go(func() error {
-		return handle(ctx, *sym, len(devices), ev)
+		err := liseg.Wait()
+		if err != nil {
+			return err
+		}
+		return errors.New("no devices available")
+	})
+	eg.Go(func() error {
+		return handle(ctx, *sym, ev)
 	})
 
 	err := eg.Wait()

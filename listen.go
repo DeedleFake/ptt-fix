@@ -21,14 +21,6 @@ func (lis Listener) Run(ctx context.Context) error {
 	logger := Logger(ctx).With("device", lis.Device)
 	ctx = WithLogger(ctx, logger)
 
-	defer func() {
-		select {
-		case <-ctx.Done():
-		case lis.C <- eventDone:
-			// TODO: This is an awkward hack and needs to be done more properly.
-		}
-	}()
-
 	for {
 		retry, err := lis.listen(ctx)
 		if (lis.Retry <= 0) || !retry {
@@ -38,7 +30,7 @@ func (lis Listener) Run(ctx context.Context) error {
 		logger.Info("waiting before retrying", "duration", lis.Retry, slogErr(err))
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return context.Cause(ctx)
 		case <-time.After(lis.Retry):
 		}
 	}
@@ -83,7 +75,7 @@ func (lis *Listener) listen(ctx context.Context) (retry bool, err error) {
 	for {
 		ev, err := d.NextEvent()
 		if err != nil {
-			if ctx.Err() != nil {
+			if context.Cause(ctx) != nil {
 				return false, err
 			}
 			if errors.Is(err, fs.ErrClosed) {
@@ -108,13 +100,13 @@ func (lis *Listener) listen(ctx context.Context) (retry bool, err error) {
 		case 1:
 			select {
 			case <-ctx.Done():
-				return false, ctx.Err()
+				return false, context.Cause(ctx)
 			case lis.C <- eventDown:
 			}
 		default:
 			select {
 			case <-ctx.Done():
-				return false, ctx.Err()
+				return false, context.Cause(ctx)
 			case lis.C <- eventUp:
 			}
 		}
