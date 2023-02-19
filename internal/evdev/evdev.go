@@ -52,12 +52,12 @@ func (d *Device) init() error {
 		return err
 	}
 
-	var buf [256]C.char
+	var buf [256]byte
 	err = cctl(conn, uintptr(C.wrap_EVIOCGNAME(256)), &buf[0])
 	if err != nil {
 		return fmt.Errorf("get device name: %w", err)
 	}
-	d.Name = C.GoString(&buf[0])
+	d.Name = fromNTString(buf[:])
 
 	var id C.struct_input_id
 	err = cctl(conn, C.EVIOCGID, &id)
@@ -69,11 +69,12 @@ func (d *Device) init() error {
 	d.Product = uint16(id.product)
 	d.Version = uint16(id.version)
 
-	err = cctl(conn, uintptr(C.wrap_EVIOCGBIT(0, 0x1F)), &buf[0])
+	var bits [0x1F]byte
+	err = cctl(conn, uintptr(C.wrap_EVIOCGBIT(0, 0x1F)), &bits[0])
 	if err != nil {
 		return fmt.Errorf("get device capabilities: %w", err)
 	}
-	d.bits = unsafe.Slice((*byte)(unsafe.Pointer(&buf[0])), 0x1F)
+	d.bits = bits[:]
 
 	var bitsREL [(C.REL_CNT + longBits - 1) / 8]byte
 	err = cctl(conn, uintptr(C.wrap_EVIOCGBIT(C.EV_REL, C.int(len(bitsREL)))), &bitsREL[0])
@@ -170,18 +171,17 @@ func (d *Device) HasEventCode(t, code uint16) bool {
 }
 
 func (d *Device) NextEvent() (InputEvent, error) {
-	var ev [unsafe.Sizeof(C.struct_input_event{})]byte
+	type inputEvent struct {
+		_ [16]byte // TODO: Add timestamp support.
+		InputEvent
+	}
+	var ev [unsafe.Sizeof(inputEvent{})]byte
 	_, err := io.ReadFull(d.file, ev[:])
 	if err != nil {
 		return InputEvent{}, fmt.Errorf("read: %w", err)
 	}
 
-	c := *(*C.struct_input_event)(unsafe.Pointer(&ev[0]))
-	return InputEvent{
-		Type:  uint16(c._type),
-		Code:  uint16(c.code),
-		Value: int32(c.value),
-	}, nil
+	return (*inputEvent)(unsafe.Pointer(&ev[0])).InputEvent, nil
 }
 
 type InputEvent struct {
@@ -220,4 +220,14 @@ func fromErrno(err unix.Errno) error {
 
 func isBitSet(bits []byte, bit uint16) bool {
 	return bits[bit/8]&(1<<(bit%8)) != 0
+}
+
+func fromNTString(b []byte) string {
+	for i, c := range b {
+		if c == 0 {
+			return unsafe.String(&b[0], i)
+		}
+	}
+
+	return unsafe.String(&b[0], len(b))
 }
