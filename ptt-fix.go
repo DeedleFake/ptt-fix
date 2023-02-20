@@ -5,8 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -122,10 +120,6 @@ func main() {
 		Level: &defaultLevel,
 	}.NewTextHandler(os.Stderr))
 	defaultLevel.Set(slog.LevelDebug)
-
-	if addr := os.Getenv("PPROF_ADDR"); addr != "" {
-		go func() { logger.Error("start pprof HTTP server", http.ListenAndServe(addr, nil)) }()
-	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
