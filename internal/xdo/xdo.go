@@ -41,24 +41,24 @@ func (xdo *Xdo) SendKeysequenceWindowUp(w Window, keys string, delay time.Durati
 	ckeys := C.CString(keys)
 	defer C.free(unsafe.Pointer(ckeys))
 
-	ok := C.xdo_send_keysequence_window_up(xdo.p, C.Window(w), ckeys, C.uint(delay.Seconds()))
-	if ok == 0 {
-		return false
-	}
-	return true
+	return C.xdo_send_keysequence_window_up(xdo.p, C.Window(w), ckeys, C.uint(delay.Seconds())) != 0
 }
 
 func (xdo *Xdo) SendKeysequenceWindowDown(w Window, keys string, delay time.Duration) bool {
 	ckeys := C.CString(keys)
 	defer C.free(unsafe.Pointer(ckeys))
 
-	ok := C.xdo_send_keysequence_window_down(xdo.p, C.Window(w), ckeys, C.uint(delay.Seconds()))
-	if ok == 0 {
-		return false
-	}
-	return true
+	return C.xdo_send_keysequence_window_down(xdo.p, C.Window(w), ckeys, C.uint(delay.Seconds())) != 0
+}
+
+func (xdo *Xdo) MouseDown(w Window, button int) bool {
+	return C.xdo_mouse_down(xdo.p, C.Window(w), C.int(button)) != 0
+}
+
+func (xdo *Xdo) MouseUp(w Window, button int) bool {
+	return C.xdo_mouse_up(xdo.p, C.Window(w), C.int(button)) != 0
 }
 
 type Window uint32
 
-const CurrentWindow Window = 0
+const CurrentWindow Window = C.CURRENTWINDOW
