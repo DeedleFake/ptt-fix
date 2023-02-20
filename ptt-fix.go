@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"deedles.dev/ptt-fix/internal/xdo"
 	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
 )
@@ -36,34 +35,6 @@ func WithLogger(ctx context.Context, logger *slog.Logger) context.Context {
 func Logger(ctx context.Context) *slog.Logger {
 	logger, _ := ctx.Value(slogCtx{}).(*slog.Logger)
 	return logger
-}
-
-func handle(ctx context.Context, key string, ev <-chan int) error {
-	logger := Logger(ctx)
-
-	do, ok := xdo.New()
-	if !ok {
-		return errors.New("xdo initialization failed")
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-
-		case ev := <-ev:
-			switch ev {
-			case eventUp:
-				do.SendKeysequenceWindowUp(xdo.CurrentWindow, key, 0)
-				logger.Debug("deactivated")
-			case eventDown:
-				do.SendKeysequenceWindowDown(xdo.CurrentWindow, key, 0)
-				logger.Debug("activated")
-			default:
-				return fmt.Errorf("invalid event: %v", ev)
-			}
-		}
-	}
 }
 
 func findDevices() ([]string, error) {
@@ -93,7 +64,7 @@ func run(ctx context.Context) error {
 		flag.PrintDefaults()
 	}
 	key := flag.Uint("key", 56, "keycode to watch for")
-	sym := flag.String("sym", "Alt_L", "key symbol to send to X")
+	sym := flag.String("sym", "Alt_L", "key symbol to send to X (mouse:<num> to send mouse buttons)")
 	retry := flag.Duration("retry", 10*time.Second, "time to wait before retrying devices that disappear (0 to disable)")
 	flag.Parse()
 
