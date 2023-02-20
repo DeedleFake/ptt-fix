@@ -31,5 +31,30 @@ ptt-fix -key 12 -sym minus /dev/input/event7
 
 And that's it. As long as the program is running, the minus key being pressed on your keyboard will be forwarded to X programs that are listening for it, such as Discord. If you'd like to listen to multiple devices, for example because you have a keyboard button mapped to your mouse and you want both devices to work, just list all of them when running the program.
 
+systemd
+-------
+
+If you would like to run the app as a service and your Linux installation uses systemd, you can use the following as a starting point for creating your own user service unit by placing it in `$HOME/.config/systemd/user` and editing it as appropriate. The following assumes that ptt-fix was installed via the AUR package which places the binary at `/usr/bin/ptt-fix`. If you installed it via `go install`, it is likely that it is at `$HOME/go/bin/ptt-fix`. Note that the unit file must have an absolute path that does not contain environment variables, so the path would then be something like `/home/<username>/go/bin/ptt-fix`. Also note that the following assumes the use of GNOME. If you use some other compositor, the `WantedBy=` line at the bottom should be changed appropriately.
+
+```systemd
+[Unit]
+Description=PTT Fix for Wayland
+
+[Service]
+ExecStart=/usr/bin/ptt-fix -key 51 -sym comma
+Restart=on-failure
+
+[Install]
+WantedBy=gnome-session-wayland.target
+```
+
+Once the file is in place and edited to your liking, run
+
+```bash
+$ systemctl --user enable --now ptt-fix.service
+```
+
+to make it automatically start upon logging into a GNOME Wayland session.
+
 [rush]: https://github.com/Rush/wayland-push-to-talk-fix
 [aur]: https://aur.archlinux.org/packages/ptt-fix
