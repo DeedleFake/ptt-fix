@@ -56,5 +56,10 @@ $ systemctl --user enable --now ptt-fix.service
 
 to make it automatically start upon logging into a GNOME Wayland session.
 
+Donate
+------
+
+<a href="https://www.buymeacoffee.com/DeedleFake" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-green.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+
 [rush]: https://github.com/Rush/wayland-push-to-talk-fix
 [aur]: https://aur.archlinux.org/packages/ptt-fix
