@@ -115,11 +115,7 @@ func run(ctx context.Context) error {
 }
 
 func main() {
-	var defaultLevel slog.LevelVar
-	logger := slog.New(slog.HandlerOptions{
-		Level: &defaultLevel,
-	}.NewTextHandler(os.Stderr))
-	defaultLevel.Set(slog.LevelDebug)
+	logger := slog.New(GlossyHandler{Level: slog.LevelDebug})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
