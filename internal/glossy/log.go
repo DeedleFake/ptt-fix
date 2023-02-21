@@ -1,4 +1,4 @@
-package main
+package glossy
 
 import (
 	"bytes"
@@ -44,18 +44,18 @@ func styleLevel(level slog.Level) lipgloss.Style {
 	}
 }
 
-type GlossyHandler struct {
+type Handler struct {
 	Level slog.Level
 
 	attrs []slog.Attr
 	group string
 }
 
-func (h GlossyHandler) render(v slog.Value) string {
-	return h.renderString(v.String())
+func render(v slog.Value) string {
+	return renderString(v.String())
 }
 
-func (h GlossyHandler) renderString(str string) string {
+func renderString(str string) string {
 	for _, c := range str {
 		if unicode.IsSpace(c) {
 			return strconv.Quote(str)
@@ -64,11 +64,11 @@ func (h GlossyHandler) renderString(str string) string {
 	return str
 }
 
-func (h GlossyHandler) Enabled(ctx context.Context, level slog.Level) bool {
+func (h Handler) Enabled(ctx context.Context, level slog.Level) bool {
 	return level >= h.Level
 }
 
-func (h GlossyHandler) Handle(r slog.Record) error {
+func (h Handler) Handle(r slog.Record) error {
 	attrs := slices.Grow(h.attrs, r.NumAttrs())
 	r.Attrs(func(a slog.Attr) {
 		attrs = append(attrs, a)
@@ -97,8 +97,8 @@ func (h GlossyHandler) Handle(r slog.Record) error {
 		fmt.Fprintf(
 			buf,
 			"\t%v=%v\n",
-			styleKey.Render(h.renderString(attr.Key)),
-			styleValue.Render(h.render(attr.Value)),
+			styleKey.Render(renderString(attr.Key)),
+			styleValue.Render(render(attr.Value)),
 		)
 	}
 
@@ -106,12 +106,13 @@ func (h GlossyHandler) Handle(r slog.Record) error {
 	return err
 }
 
-func (h GlossyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+func (h Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	h.attrs = slices.Clip(append(h.attrs, attrs...))
 	return h
 }
 
-func (h GlossyHandler) WithGroup(name string) slog.Handler {
+func (h Handler) WithGroup(name string) slog.Handler {
+	// TODO: Fix this.
 	h.group = name
 	return h
 }

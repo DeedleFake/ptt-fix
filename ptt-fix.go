@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"deedles.dev/ptt-fix/internal/glossy"
 	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
 )
@@ -115,7 +116,7 @@ func run(ctx context.Context) error {
 }
 
 func main() {
-	logger := slog.New(GlossyHandler{Level: slog.LevelDebug})
+	logger := slog.New(glossy.Handler{Level: slog.LevelDebug})
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
