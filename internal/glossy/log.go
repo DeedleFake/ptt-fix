@@ -19,14 +19,14 @@ import (
 var bufPool sync.Pool
 
 var (
-	styleTime  = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
-	styleKey   = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
+	styleTime  = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#22222", Dark: "#AAAAAA"})
+	styleKey   = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#22222", Dark: "#AAAAAA"})
 	styleValue = lipgloss.NewStyle()
 
-	styleError = lipgloss.NewStyle().Foreground(lipgloss.Color("#EE0000"))
-	styleWarn  = lipgloss.NewStyle().Foreground(lipgloss.Color("#EEEE00"))
-	styleInfo  = lipgloss.NewStyle().Foreground(lipgloss.Color("#5555EE"))
-	styleDebug = lipgloss.NewStyle().Foreground(lipgloss.Color("#00EE00"))
+	styleError = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#AA0000", Dark: "#EE0000"})
+	styleWarn  = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#AAAA00", Dark: "#EEEE00"})
+	styleInfo  = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#3333AA", Dark: "#5555EE"})
+	styleDebug = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#00AA00", Dark: "#00EE00"})
 )
 
 func styleLevel(level slog.Level) lipgloss.Style {
