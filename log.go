@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 	"unicode"
 
@@ -12,6 +15,8 @@ import (
 	"golang.org/x/exp/slices"
 	"golang.org/x/exp/slog"
 )
+
+var bufPool sync.Pool
 
 var (
 	styleTime  = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
@@ -72,8 +77,17 @@ func (h GlossyHandler) Handle(r slog.Record) error {
 		attrs = []slog.Attr{slog.Group(h.group, attrs...)}
 	}
 
+	buf, _ := bufPool.Get().(*bytes.Buffer)
+	if buf == nil {
+		buf = new(bytes.Buffer)
+	}
+	defer func() {
+		buf.Reset()
+		bufPool.Put(buf)
+	}()
+
 	fmt.Fprintf(
-		os.Stderr,
+		buf,
 		"%v %v %v\n",
 		styleTime.Render(r.Time.Format(time.StampMilli)),
 		styleLevel(r.Level).Render(r.Level.String()),
@@ -81,14 +95,15 @@ func (h GlossyHandler) Handle(r slog.Record) error {
 	)
 	for _, attr := range attrs {
 		fmt.Fprintf(
-			os.Stderr,
+			buf,
 			"\t%v=%v\n",
 			styleKey.Render(h.renderString(attr.Key)),
 			styleValue.Render(h.render(attr.Value)),
 		)
 	}
 
-	return nil
+	_, err := io.Copy(os.Stderr, buf)
+	return err
 }
 
 func (h GlossyHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
