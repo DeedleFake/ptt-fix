@@ -14,13 +14,13 @@ import (
 )
 
 var (
-	styleTime  = lipgloss.NewStyle()
+	styleTime  = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
 	styleKey   = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
 	styleValue = lipgloss.NewStyle()
 
 	styleError = lipgloss.NewStyle().Foreground(lipgloss.Color("#EE0000"))
 	styleWarn  = lipgloss.NewStyle().Foreground(lipgloss.Color("#EEEE00"))
-	styleInfo  = lipgloss.NewStyle().Foreground(lipgloss.Color("#0000EE"))
+	styleInfo  = lipgloss.NewStyle().Foreground(lipgloss.Color("#5555EE"))
 	styleDebug = lipgloss.NewStyle().Foreground(lipgloss.Color("#00EE00"))
 )
 
