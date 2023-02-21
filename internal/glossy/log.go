@@ -51,11 +51,7 @@ type Handler struct {
 	group string
 }
 
-func render(v slog.Value) string {
-	return renderString(v.String())
-}
-
-func renderString(str string) string {
+func quoteIfNecessary(str string) string {
 	for _, c := range str {
 		if unicode.IsSpace(c) {
 			return strconv.Quote(str)
@@ -97,8 +93,8 @@ func (h Handler) Handle(r slog.Record) error {
 		fmt.Fprintf(
 			buf,
 			"\t%v=%v\n",
-			styleKey.Render(renderString(attr.Key)),
-			styleValue.Render(render(attr.Value)),
+			styleKey.Render(quoteIfNecessary(attr.Key)),
+			styleValue.Render(quoteIfNecessary(attr.Value.String())),
 		)
 	}
 
