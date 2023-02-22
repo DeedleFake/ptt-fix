@@ -14,6 +14,8 @@ To install manually, you will need `libxdo` installed. Then, simply run
 $ go install deedles.dev/ptt-fix@latest
 ```
 
+A manual installation of this kind will need to be run as root as regular users don't normally, and shouldn't, have read access to the devices in `/dev/input`.
+
 Usage
 -----
 
