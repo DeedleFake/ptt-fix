@@ -5,11 +5,13 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"time"
+	"strings"
 
+	"deedles.dev/ptt-fix/internal/config"
 	"deedles.dev/ptt-fix/internal/glossy"
 	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
@@ -57,41 +59,69 @@ func findDevices() ([]string, error) {
 }
 
 func run(ctx context.Context) error {
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %v [/dev/input/by-id/<device>...]\n", os.Args[0])
-		fmt.Fprintln(os.Stderr, "Options:")
-		flag.PrintDefaults()
+	logger := Logger(ctx)
+
+	defaultConfigPath, err := config.DefaultPath()
+	if err != nil {
+		return fmt.Errorf("get default config path: %w", err)
 	}
-	key := flag.Uint("key", 56, "keycode to watch for")
-	sym := flag.String("sym", "Alt_L", "key symbol to send to X (mouse:<num> to send mouse buttons)")
-	retry := flag.Duration("retry", 10*time.Second, "time to wait before retrying devices that disappear (0 to disable)")
+
+	createConfig := flag.Bool("createconfig", false, "write the default config so that it can be modified and then exit")
+	configPath := flag.String("config", defaultConfigPath, "config file to use for either reading or writing")
 	flag.Parse()
 
-	devices := flag.Args()
-	if len(devices) == 0 {
-		d, err := findDevices()
+	if *createConfig {
+		err := os.MkdirAll(filepath.Dir(*configPath), 0700)
 		if err != nil {
-			return fmt.Errorf("find devices: %w", err)
-		}
-		if len(d) == 0 {
-			return errors.New("no devices found")
+			return fmt.Errorf("create config directory: %w", err)
 		}
 
-		devices = d
+		file, err := os.Create(*configPath)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		_, err = file.WriteString(config.DefaultFile())
+		if err != nil {
+			return fmt.Errorf("write default config: %w", err)
+		}
+
+		logger.Info(
+			"write default config file",
+			"path", *configPath,
+		)
+		return nil
 	}
+
+	logPath := []any{"path", *configPath}
+	c, err := config.Load(*configPath)
+	if err != nil {
+		if (*configPath != defaultConfigPath) || !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("load config: %w", err)
+		}
+
+		logPath = []any{"default", true}
+		c, err = config.Parse(strings.NewReader(config.DefaultFile()))
+		if err != nil {
+			// If this happens, it's a bug.
+			return fmt.Errorf("parse default config: %w", err)
+		}
+	}
+	logger.Info("loaded config", logPath...)
 
 	eg, ctx := errgroup.WithContext(ctx)
 
 	var liseg errgroup.Group
 	ev := make(chan int)
-	for _, dev := range devices {
+	for _, dev := range c.Devices {
 		dev := dev
 		liseg.Go(func() error {
 			return Listener{
 				Device:  dev,
-				Keycode: uint16(*key),
+				Keycode: uint16(c.Key),
 				C:       ev,
-				Retry:   *retry,
+				Retry:   c.Retry,
 			}.Run(ctx)
 		})
 	}
@@ -104,10 +134,10 @@ func run(ctx context.Context) error {
 		return errors.New("no devices available")
 	})
 	eg.Go(func() error {
-		return handle(ctx, *sym, ev)
+		return handle(ctx, c.Sym, ev)
 	})
 
-	err := eg.Wait()
+	err = eg.Wait()
 	if (err != nil) && !errors.Is(err, context.Canceled) {
 		return err
 	}
