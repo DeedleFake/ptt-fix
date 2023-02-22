@@ -1,0 +1,41 @@
+# This is an example default config that is automatically generated.
+# Feel free to edit it to fit your particular system.
+
+# The `key` directive indicates a key to listen for from a device. The
+# key is denoted by an integer code. The codes for specific keys can
+# be found in /usr/include/linux/input-event-codes.h by looking for a
+# macro definition that's named like the key you want to use and then
+# finding the corresponding number at the end of the line. For
+# example, the default, left alt, is 56, and can be found as
+# `KEY_LEFTALT` in the aforementioned file.
+#
+# The value may also be specified in hex, octal, or binary by
+# prefixing it with `0x`, `0` or `0o`, or `0b`, respectively.
+key 56
+
+# The `sym` directive indicates the symbol to send to the application
+# that is listening for push-to-talk events. This symbol is a string
+# which corresponds to the macro names in
+# /usr/include/xkbcommon/xkbcommon-keysyms.h. For example, the symbol
+# for the default, left alt, is `Alt_L` and the macro listed in the
+# aforementioned header file is `XKB_KEY_Alt_L`. Simply find the key
+# that you'd like and remove the `XKB_KEY_` prefix.
+#
+# As a special case, the symbol may instead be in the form
+# `mouse:number` where `number` is any integer. This will cause a
+# mouse button press to be sent instead. For example, `mouse:2` will
+# cause mouse 2, the scroll wheel click, to be sent to the
+# application.
+sym Alt_L
+
+# The `retry` directive indicates the amount of time to wait before
+# retrying a device when it has a potentially temporary error, such as
+# having been disconnected from the computer. A value of `0` indicates
+# that no retry attempts should be made.
+retry 10s
+
+# A `device` directive indicates a glob to use to find device files to
+# listen to. This directive may be specified more than once. All
+# listed devices will be listened to if they are capable of sending
+# the requested key.
+device /dev/input/by-id/*
