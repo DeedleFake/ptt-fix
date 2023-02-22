@@ -5,12 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 
+	"deedles.dev/ptt-fix/internal/config"
 	"deedles.dev/ptt-fix/internal/xdo"
 )
 
-func handle(ctx context.Context, key string, ev <-chan int) error {
+func handle(ctx context.Context, key config.Sym, ev <-chan int) error {
 	logger := Logger(ctx)
 
 	do, ok := xdo.New()
@@ -48,16 +48,21 @@ type sender interface {
 	Down()
 }
 
-func newSender(do *xdo.Xdo, sym string) (sender, error) {
-	if n, ok := strings.CutPrefix(sym, "mouse:"); ok {
-		v, err := strconv.ParseInt(n, 10, 0)
+func newSender(do *xdo.Xdo, sym config.Sym) (sender, error) {
+	switch sym.Type {
+	case "key":
+		return keySender{do, sym.Val}, nil
+
+	case "mouse":
+		v, err := strconv.ParseInt(sym.Val, 0, 0)
 		if err != nil {
-			return nil, fmt.Errorf("parse mouse button %q: %v", n, err)
+			return nil, fmt.Errorf("invalid mouse button: %w", err)
 		}
 		return mouseSender{do, int(v)}, nil
-	}
 
-	return keySender{do, sym}, nil
+	default:
+		return nil, fmt.Errorf("invalid sym type: %q", sym.Type)
+	}
 }
 
 type keySender struct {

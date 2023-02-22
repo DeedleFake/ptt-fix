@@ -1,0 +1,10 @@
+[Unit]
+Description=PTT Fix
+After=org.gnome.Session@wayland.service
+
+[Service]
+ExecStart=/usr/bin/ptt-fix
+Retry=on-failure
+
+[Install]
+WantedBy=gnome-session-wayland.target
