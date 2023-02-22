@@ -22,8 +22,8 @@ key 56
 # that you'd like and remove the `XKB_KEY_` prefix.
 #
 # As a special case, the symbol may instead be in the form
-# `mouse:number` where `number` is any integer. This will cause a
-# mouse button press to be sent instead. For example, `mouse:2` will
+# `mouse <number>` where `<number>` is any integer. This will cause a
+# mouse button press to be sent instead. For example, `mouse 2` will
 # cause mouse 2, the scroll wheel click, to be sent to the
 # application.
 sym Alt_L

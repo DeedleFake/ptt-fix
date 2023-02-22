@@ -95,8 +95,9 @@ func (c *Config) sym(str string) error {
 		return errors.New("attempted to set sym twice")
 	}
 
-	t, v, ok := strings.Cut(str, ":")
+	t, v, ok := strings.Cut(str, " ")
 	if !ok {
+		v = t
 		t = "key"
 	}
 	c.Sym = Sym{Type: t, Val: v}
