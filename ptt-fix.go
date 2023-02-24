@@ -13,6 +13,7 @@ import (
 
 	"deedles.dev/ptt-fix/internal/config"
 	"deedles.dev/ptt-fix/internal/glossy"
+	"github.com/coreos/go-systemd/v22/journal"
 	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
 )
@@ -146,14 +147,21 @@ func run(ctx context.Context) error {
 }
 
 func main() {
-	logger := slog.New(glossy.Handler{Level: slog.LevelDebug})
+	usejournal, err := journal.StderrIsJournalStream()
+	logger := slog.New(glossy.Handler{
+		UseJournal: usejournal,
+		Level:      slog.LevelDebug,
+	})
+	if err != nil {
+		logger.Error("could not determine if output is to journal", err)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	ctx = WithLogger(ctx, logger)
 
-	err := run(ctx)
+	err = run(ctx)
 	if err != nil {
 		logger.Error("fatal", err)
 		os.Exit(1)

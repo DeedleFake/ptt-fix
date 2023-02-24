@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -45,7 +44,8 @@ func styleLevel(level slog.Level) lipgloss.Style {
 }
 
 type Handler struct {
-	Level slog.Level
+	UseJournal bool
+	Level      slog.Level
 
 	attrs []slog.Attr
 	group string
@@ -64,7 +64,20 @@ func (h Handler) Enabled(ctx context.Context, level slog.Level) bool {
 	return level >= h.Level
 }
 
-func (h Handler) Handle(r slog.Record) error {
+func (h Handler) writer(r slog.Record) io.WriteCloser {
+	buf, _ := bufPool.Get().(*bytes.Buffer)
+	if buf == nil {
+		buf = new(bytes.Buffer)
+	}
+
+	if h.UseJournal {
+		return &journalOutput{buf, r}
+	}
+
+	return &stderrOutput{buf}
+}
+
+func (h Handler) Handle(ctx context.Context, r slog.Record) error {
 	attrs := slices.Grow(h.attrs, r.NumAttrs())
 	r.Attrs(func(a slog.Attr) {
 		attrs = append(attrs, a)
@@ -73,33 +86,32 @@ func (h Handler) Handle(r slog.Record) error {
 		attrs = []slog.Attr{slog.Group(h.group, attrs...)}
 	}
 
-	buf, _ := bufPool.Get().(*bytes.Buffer)
-	if buf == nil {
-		buf = new(bytes.Buffer)
+	w := h.writer(r)
+
+	if !h.UseJournal {
+		fmt.Fprintf(
+			w,
+			"%v %v ",
+			styleTime.Render(r.Time.Format(time.StampMilli)),
+			styleLevel(r.Level).Render(r.Level.String()),
+		)
 	}
-	defer func() {
-		buf.Reset()
-		bufPool.Put(buf)
-	}()
 
 	fmt.Fprintf(
-		buf,
-		"%v %v %v\n",
-		styleTime.Render(r.Time.Format(time.StampMilli)),
-		styleLevel(r.Level).Render(r.Level.String()),
+		w,
+		"%v\n",
 		r.Message,
 	)
 	for _, attr := range attrs {
 		fmt.Fprintf(
-			buf,
+			w,
 			"\t%v=%v\n",
 			styleKey.Render(quoteIfNecessary(attr.Key)),
 			styleValue.Render(quoteIfNecessary(attr.Value.String())),
 		)
 	}
 
-	_, err := io.Copy(os.Stderr, buf)
-	return err
+	return w.Close()
 }
 
 func (h Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
