@@ -5,14 +5,12 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"sync"
 	"time"
 	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/coreos/go-systemd/v22/journal"
 	"golang.org/x/exp/slices"
 	"golang.org/x/exp/slog"
 )
@@ -45,21 +43,6 @@ func styleLevel(level slog.Level) lipgloss.Style {
 	}
 }
 
-func toJournalPriority(level slog.Level) journal.Priority {
-	switch {
-	case level >= slog.LevelError:
-		return journal.PriErr
-	case level >= slog.LevelWarn:
-		return journal.PriWarning
-	case level >= slog.LevelInfo:
-		return journal.PriInfo
-	case level >= slog.LevelDebug:
-		return journal.PriDebug
-	default:
-		panic(fmt.Errorf("unsupporter log level: %v", level))
-	}
-}
-
 type Handler struct {
 	UseJournal bool
 	Level      slog.Level
@@ -81,6 +64,19 @@ func (h Handler) Enabled(ctx context.Context, level slog.Level) bool {
 	return level >= h.Level
 }
 
+func (h Handler) writer(r slog.Record) io.WriteCloser {
+	buf, _ := bufPool.Get().(*bytes.Buffer)
+	if buf == nil {
+		buf = new(bytes.Buffer)
+	}
+
+	if h.UseJournal {
+		return &journalOutput{buf, r}
+	}
+
+	return &stderrOutput{buf}
+}
+
 func (h Handler) Handle(ctx context.Context, r slog.Record) error {
 	attrs := slices.Grow(h.attrs, r.NumAttrs())
 	r.Attrs(func(a slog.Attr) {
@@ -90,46 +86,32 @@ func (h Handler) Handle(ctx context.Context, r slog.Record) error {
 		attrs = []slog.Attr{slog.Group(h.group, attrs...)}
 	}
 
-	if h.UseJournal {
-		return h.handleJournal(r, attrs)
-	}
+	w := h.writer(r)
 
-	buf, _ := bufPool.Get().(*bytes.Buffer)
-	if buf == nil {
-		buf = new(bytes.Buffer)
+	if !h.UseJournal {
+		fmt.Fprintf(
+			w,
+			"%v %v ",
+			styleTime.Render(r.Time.Format(time.StampMilli)),
+			styleLevel(r.Level).Render(r.Level.String()),
+		)
 	}
-	defer func() {
-		buf.Reset()
-		bufPool.Put(buf)
-	}()
 
 	fmt.Fprintf(
-		buf,
-		"%v %v %v\n",
-		styleTime.Render(r.Time.Format(time.StampMilli)),
-		styleLevel(r.Level).Render(r.Level.String()),
+		w,
+		"%v\n",
 		r.Message,
 	)
 	for _, attr := range attrs {
 		fmt.Fprintf(
-			buf,
+			w,
 			"\t%v=%v\n",
 			styleKey.Render(quoteIfNecessary(attr.Key)),
 			styleValue.Render(quoteIfNecessary(attr.Value.String())),
 		)
 	}
 
-	_, err := io.Copy(os.Stderr, buf)
-	return err
-}
-
-func (h Handler) handleJournal(r slog.Record, attrs []slog.Attr) error {
-	vars := make(map[string]string, len(attrs))
-	for _, attr := range attrs {
-		vars[attr.Key] = attr.Value.String()
-	}
-
-	return journal.Send(r.Message, toJournalPriority(r.Level), vars)
+	return w.Close()
 }
 
 func (h Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
