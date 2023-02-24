@@ -18,8 +18,15 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+type event struct {
+	Type   eventType
+	Device string
+}
+
+type eventType uint8
+
 const (
-	eventInvalid = iota
+	eventInvalid eventType = iota
 	eventUp
 	eventDown
 )
@@ -114,7 +121,7 @@ func run(ctx context.Context) error {
 	eg, ctx := errgroup.WithContext(ctx)
 
 	var liseg errgroup.Group
-	ev := make(chan int)
+	ev := make(chan event)
 	for _, dev := range c.Devices {
 		dev := dev
 		liseg.Go(func() error {

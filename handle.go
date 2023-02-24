@@ -10,7 +10,7 @@ import (
 	"deedles.dev/ptt-fix/internal/xdo"
 )
 
-func handle(ctx context.Context, key config.Sym, ev <-chan int) error {
+func handle(ctx context.Context, key config.Sym, ev <-chan event) error {
 	logger := Logger(ctx)
 
 	do, ok := xdo.New()
@@ -29,13 +29,13 @@ func handle(ctx context.Context, key config.Sym, ev <-chan int) error {
 			return context.Cause(ctx)
 
 		case ev := <-ev:
-			switch ev {
+			switch ev.Type {
 			case eventUp:
 				sender.Up()
-				logger.Debug("deactivated")
+				logger.Debug("deactivated", "device", ev.Device)
 			case eventDown:
 				sender.Down()
-				logger.Debug("activated")
+				logger.Debug("activated", "device", ev.Device)
 			default:
 				return fmt.Errorf("invalid event: %v", ev)
 			}
