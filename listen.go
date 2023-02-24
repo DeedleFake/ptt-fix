@@ -13,7 +13,7 @@ import (
 type Listener struct {
 	Device  string
 	Keycode uint16
-	C       chan<- int
+	C       chan<- event
 	Retry   time.Duration
 }
 
@@ -101,13 +101,13 @@ func (lis *Listener) listen(ctx context.Context) (retry bool, err error) {
 			select {
 			case <-ctx.Done():
 				return false, context.Cause(ctx)
-			case lis.C <- eventDown:
+			case lis.C <- event{Type: eventDown, Device: lis.Device}:
 			}
 		default:
 			select {
 			case <-ctx.Done():
 				return false, context.Cause(ctx)
-			case lis.C <- eventUp:
+			case lis.C <- event{Type: eventUp, Device: lis.Device}:
 			}
 		}
 	}
