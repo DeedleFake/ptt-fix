@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/coreos/go-systemd/v22/journal"
 	"golang.org/x/exp/slices"
 	"golang.org/x/exp/slog"
 )
@@ -44,8 +45,24 @@ func styleLevel(level slog.Level) lipgloss.Style {
 	}
 }
 
+func toJournalPriority(level slog.Level) journal.Priority {
+	switch {
+	case level >= slog.LevelError:
+		return journal.PriErr
+	case level >= slog.LevelWarn:
+		return journal.PriWarning
+	case level >= slog.LevelInfo:
+		return journal.PriInfo
+	case level >= slog.LevelDebug:
+		return journal.PriDebug
+	default:
+		panic(fmt.Errorf("unsupporter log level: %v", level))
+	}
+}
+
 type Handler struct {
-	Level slog.Level
+	UseJournal bool
+	Level      slog.Level
 
 	attrs []slog.Attr
 	group string
@@ -64,13 +81,17 @@ func (h Handler) Enabled(ctx context.Context, level slog.Level) bool {
 	return level >= h.Level
 }
 
-func (h Handler) Handle(r slog.Record) error {
+func (h Handler) Handle(ctx context.Context, r slog.Record) error {
 	attrs := slices.Grow(h.attrs, r.NumAttrs())
 	r.Attrs(func(a slog.Attr) {
 		attrs = append(attrs, a)
 	})
 	if h.group != "" {
 		attrs = []slog.Attr{slog.Group(h.group, attrs...)}
+	}
+
+	if h.UseJournal {
+		return h.handleJournal(r, attrs)
 	}
 
 	buf, _ := bufPool.Get().(*bytes.Buffer)
@@ -100,6 +121,15 @@ func (h Handler) Handle(r slog.Record) error {
 
 	_, err := io.Copy(os.Stderr, buf)
 	return err
+}
+
+func (h Handler) handleJournal(r slog.Record, attrs []slog.Attr) error {
+	vars := make(map[string]string, len(attrs))
+	for _, attr := range attrs {
+		vars[attr.Key] = attr.Value.String()
+	}
+
+	return journal.Send(r.Message, toJournalPriority(r.Level), vars)
 }
 
 func (h Handler) WithAttrs(attrs []slog.Attr) slog.Handler {

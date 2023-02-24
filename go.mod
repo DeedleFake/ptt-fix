@@ -4,7 +4,8 @@ go 1.20
 
 require (
 	github.com/charmbracelet/lipgloss v0.6.0
-	golang.org/x/exp v0.0.0-20230213192124-5e25df0256eb
+	github.com/coreos/go-systemd/v22 v22.5.0
+	golang.org/x/exp v0.0.0-20230223210539-50820d90acfd
 	golang.org/x/sync v0.1.0
 	golang.org/x/sys v0.5.0
 )
