@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"unsafe"
 
 	"github.com/coreos/go-systemd/v22/journal"
-	"golang.org/x/exp/slog"
 )
 
 type stderrOutput struct {
