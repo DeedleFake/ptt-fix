@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -14,7 +15,6 @@ import (
 	"deedles.dev/ptt-fix/internal/config"
 	"deedles.dev/ptt-fix/internal/glossy"
 	"github.com/coreos/go-systemd/v22/journal"
-	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -32,7 +32,7 @@ const (
 )
 
 func slogErr(err error) slog.Attr {
-	return slog.Any(slog.ErrorKey, err)
+	return slog.Any("err", err)
 }
 
 type slogCtx struct{}
@@ -160,7 +160,7 @@ func main() {
 		Level:      slog.LevelDebug,
 	})
 	if err != nil {
-		logger.Error("could not determine if output is to journal", err)
+		logger.Error("could not determine if output is to journal", slogErr(err))
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -170,7 +170,7 @@ func main() {
 
 	err = run(ctx)
 	if err != nil {
-		logger.Error("fatal", err)
+		logger.Error("fatal", slogErr(err))
 		os.Exit(1)
 	}
 }
