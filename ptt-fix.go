@@ -31,9 +31,7 @@ const (
 	eventDown
 )
 
-func slogErr(err error) slog.Attr {
-	return slog.Any("err", err)
-}
+const errKey = "err"
 
 type slogCtx struct{}
 
@@ -158,9 +156,10 @@ func main() {
 	logger := slog.New(glossy.Handler{
 		UseJournal: usejournal,
 		Level:      slog.LevelDebug,
+		ErrKey:     errKey,
 	})
 	if err != nil {
-		logger.Error("could not determine if output is to journal", slogErr(err))
+		logger.Error("could not determine if output is to journal", errKey, err)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -170,7 +169,7 @@ func main() {
 
 	err = run(ctx)
 	if err != nil {
-		logger.Error("fatal", slogErr(err))
+		logger.Error("fatal", errKey, err)
 		os.Exit(1)
 	}
 }
