@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -14,7 +15,6 @@ import (
 	"deedles.dev/ptt-fix/internal/config"
 	"deedles.dev/ptt-fix/internal/glossy"
 	"github.com/coreos/go-systemd/v22/journal"
-	"golang.org/x/exp/slog"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -31,9 +31,7 @@ const (
 	eventDown
 )
 
-func slogErr(err error) slog.Attr {
-	return slog.Any(slog.ErrorKey, err)
-}
+const errKey = "err"
 
 type slogCtx struct{}
 
@@ -158,9 +156,10 @@ func main() {
 	logger := slog.New(glossy.Handler{
 		UseJournal: usejournal,
 		Level:      slog.LevelDebug,
+		ErrKey:     errKey,
 	})
 	if err != nil {
-		logger.Error("could not determine if output is to journal", err)
+		logger.Error("could not determine if output is to journal", errKey, err)
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -170,7 +169,7 @@ func main() {
 
 	err = run(ctx)
 	if err != nil {
-		logger.Error("fatal", err)
+		logger.Error("fatal", errKey, err)
 		os.Exit(1)
 	}
 }

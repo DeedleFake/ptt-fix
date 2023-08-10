@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"strconv"
 	"sync"
 	"time"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"golang.org/x/exp/slices"
-	"golang.org/x/exp/slog"
 )
 
 var bufPool sync.Pool
@@ -46,6 +46,7 @@ func styleLevel(level slog.Level) lipgloss.Style {
 type Handler struct {
 	UseJournal bool
 	Level      slog.Level
+	ErrKey     string
 
 	attrs []slog.Attr
 	group string
@@ -79,11 +80,16 @@ func (h Handler) writer(r slog.Record) io.WriteCloser {
 
 func (h Handler) Handle(ctx context.Context, r slog.Record) error {
 	attrs := slices.Grow(h.attrs, r.NumAttrs())
-	r.Attrs(func(a slog.Attr) {
+	r.Attrs(func(a slog.Attr) bool {
 		attrs = append(attrs, a)
+		return true
 	})
 	if h.group != "" {
-		attrs = []slog.Attr{slog.Group(h.group, attrs...)}
+		group := make([]any, 0, len(attrs))
+		for _, a := range attrs {
+			group = append(group, a)
+		}
+		attrs = []slog.Attr{slog.Group(h.group, group...)}
 	}
 
 	w := h.writer(r)
@@ -106,12 +112,19 @@ func (h Handler) Handle(ctx context.Context, r slog.Record) error {
 		fmt.Fprintf(
 			w,
 			"\t%v=%v\n",
-			styleKey.Render(quoteIfNecessary(attr.Key)),
+			h.styleKey(attr.Key),
 			styleValue.Render(quoteIfNecessary(attr.Value.String())),
 		)
 	}
 
 	return w.Close()
+}
+
+func (h Handler) styleKey(v string) string {
+	if (h.ErrKey != "") && (v == h.ErrKey) {
+		return styleError.Render(quoteIfNecessary(v))
+	}
+	return styleKey.Render(quoteIfNecessary(v))
 }
 
 func (h Handler) WithAttrs(attrs []slog.Attr) slog.Handler {

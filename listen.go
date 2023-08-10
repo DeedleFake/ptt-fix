@@ -27,7 +27,7 @@ func (lis Listener) Run(ctx context.Context) error {
 			return err
 		}
 
-		logger.Info("waiting before retrying", "duration", lis.Retry, slogErr(err))
+		logger.Info("waiting before retrying", "duration", lis.Retry, errKey, err)
 		select {
 		case <-ctx.Done():
 			return context.Cause(ctx)
@@ -49,7 +49,7 @@ func (lis *Listener) listen(ctx context.Context) (retry bool, err error) {
 			return true, err
 		}
 
-		logger.Warn("ignoring device", "reason", "failed to open", slogErr(err))
+		logger.Warn("ignoring device", "reason", "failed to open", errKey, err)
 		return false, nil
 	}
 	defer d.Close()
@@ -83,11 +83,11 @@ func (lis *Listener) listen(ctx context.Context) (retry bool, err error) {
 				return false, nil
 			}
 			if isTemporary(err) {
-				logger.Warn("device disappeared while reading", slogErr(err))
+				logger.Warn("device disappeared while reading", errKey, err)
 				return true, err
 			}
 
-			logger.Warn("read event", slogErr(err))
+			logger.Warn("read event", errKey, err)
 			continue
 		}
 
