@@ -46,6 +46,7 @@ func styleLevel(level slog.Level) lipgloss.Style {
 type Handler struct {
 	UseJournal bool
 	Level      slog.Level
+	ErrKey     string
 
 	attrs []slog.Attr
 	group string
@@ -111,12 +112,19 @@ func (h Handler) Handle(ctx context.Context, r slog.Record) error {
 		fmt.Fprintf(
 			w,
 			"\t%v=%v\n",
-			styleKey.Render(quoteIfNecessary(attr.Key)),
+			h.styleKey(attr.Key),
 			styleValue.Render(quoteIfNecessary(attr.Value.String())),
 		)
 	}
 
 	return w.Close()
+}
+
+func (h Handler) styleKey(v string) string {
+	if (h.ErrKey != "") && (v == h.ErrKey) {
+		return styleError.Render(quoteIfNecessary(v))
+	}
+	return styleKey.Render(quoteIfNecessary(v))
 }
 
 func (h Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
