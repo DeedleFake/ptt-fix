@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"deedles.dev/xiter"
 	"golang.org/x/sys/unix"
 )
 
@@ -56,56 +57,56 @@ func (d *Device) init() error {
 	}
 	d.bits = bits[:]
 
-	var bitsREL [(relCount + wordbits - 1) / 8]byte
+	var bitsREL [(relCount + wordbits - 1)/8]byte
 	err = cctl(conn, uintptr(eviocgbit(EvRel, uintptr(len(bitsREL)))), &bitsREL[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsREL = bitsREL[:]
 
-	var bitsABS [(absCount + wordbits - 1) / 8]byte
+	var bitsABS [(absCount + wordbits - 1)/8]byte
 	err = cctl(conn, uintptr(eviocgbit(EvAbs, uintptr(len(bitsABS)))), &bitsABS[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsABS = bitsABS[:]
 
-	var bitsLED [(ledCount + wordbits - 1) / 8]byte
+	var bitsLED [(ledCount + wordbits - 1)/8]byte
 	err = cctl(conn, uintptr(eviocgbit(evLed, uintptr(len(bitsLED)))), &bitsLED[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsLED = bitsLED[:]
 
-	var bitsKEY [(keyCount + wordbits - 1) / 8]byte
+	var bitsKEY [(keyCount + wordbits - 1)/8]byte
 	err = cctl(conn, uintptr(eviocgbit(EvKey, uintptr(len(bitsKEY)))), &bitsKEY[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsKEY = bitsKEY[:]
 
-	var bitsSW [(swCount + wordbits - 1) / 8]byte
+	var bitsSW [(swCount + wordbits - 1)/8]byte
 	err = cctl(conn, uintptr(eviocgbit(EvSw, uintptr(len(bitsSW)))), &bitsSW[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsSW = bitsSW[:]
 
-	var bitsMSC [(mscCount + wordbits - 1) / 8]byte
+	var bitsMSC [(mscCount + wordbits - 1)/8]byte
 	err = cctl(conn, uintptr(eviocgbit(EvMsc, uintptr(len(bitsMSC)))), &bitsMSC[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsMSC = bitsMSC[:]
 
-	var bitsFF [(ffCount + wordbits - 1) / 8]byte
+	var bitsFF [(ffCount + wordbits - 1)/8]byte
 	err = cctl(conn, uintptr(eviocgbit(evFf, uintptr(len(bitsFF)))), &bitsFF[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
 	}
 	d.bitsFF = bitsFF[:]
 
-	var bitsSND [(sndCount + wordbits - 1) / 8]byte
+	var bitsSND [(sndCount + wordbits - 1)/8]byte
 	err = cctl(conn, uintptr(eviocgbit(evSnd, uintptr(len(bitsSND)))), &bitsSND[0])
 	if err != nil {
 		return fmt.Errorf("get type bits: %w", err)
@@ -162,6 +163,17 @@ func (d *Device) NextEvent() (InputEvent, error) {
 	}
 
 	return (*inputEvent)(unsafe.Pointer(&ev[0])).InputEvent, nil
+}
+
+func (d *Device) Events() xiter.Seq2[InputEvent, error] {
+	return func(yield func(InputEvent, error) bool) bool {
+		for {
+			ev, err := d.NextEvent()
+			if !yield(ev, err) {
+				return false
+			}
+		}
+	}
 }
 
 type InputEvent struct {

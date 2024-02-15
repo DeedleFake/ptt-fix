@@ -8,6 +8,7 @@ import (
 
 	"deedles.dev/ptt-fix/internal/config"
 	"deedles.dev/ptt-fix/internal/xdo"
+	"deedles.dev/xiter"
 )
 
 func handle(ctx context.Context, key config.Sym, ev <-chan event) error {
@@ -23,24 +24,19 @@ func handle(ctx context.Context, key config.Sym, ev <-chan event) error {
 		return err
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-
-		case ev := <-ev:
-			switch ev.Type {
-			case eventUp:
-				sender.Up()
-				logger.Debug("deactivated", "device", ev.Device)
-			case eventDown:
-				sender.Down()
-				logger.Debug("activated", "device", ev.Device)
-			default:
-				return fmt.Errorf("invalid event: %v", ev)
-			}
+	for ev := range xiter.RecvContext(ctx, ev) {
+		switch ev.Type {
+		case eventUp:
+			sender.Up()
+			logger.Debug("deactivated", "device", ev.Device)
+		case eventDown:
+			sender.Down()
+			logger.Debug("activated", "device", ev.Device)
+		default:
+			return fmt.Errorf("invalid event: %v", ev)
 		}
 	}
+	return context.Cause(ctx)
 }
 
 type sender interface {

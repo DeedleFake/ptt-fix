@@ -1,8 +1,9 @@
 module deedles.dev/ptt-fix
 
-go 1.20
+go 1.21
 
 require (
+	deedles.dev/xiter v0.0.0-20230827184420-158164c9eb75
 	github.com/charmbracelet/lipgloss v0.7.1
 	github.com/coreos/go-systemd/v22 v22.5.0
 	golang.org/x/exp v0.0.0-20230810033253-352e893a4cad

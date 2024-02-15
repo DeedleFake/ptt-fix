@@ -1,3 +1,5 @@
+deedles.dev/xiter v0.0.0-20230827184420-158164c9eb75 h1:Wy4AlnMwFHqno+tU1xbkhnSfCiBnfBRmWXgf7Esp95M=
+deedles.dev/xiter v0.0.0-20230827184420-158164c9eb75/go.mod h1:Mu30hAcR8t/9Be92uLQx2oxc+/svIXUWtygWiCMH8cU=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1/go.mod h1:uYgXzlJ7ZpABp8OJ+exZzJJhRNQ2ASbcXHWsFqH8hp8=
 github.com/charmbracelet/lipgloss v0.7.1 h1:17WMwi7N1b1rVWOjMT+rCh7sQkvDU75B2hbZpc5Kc1E=

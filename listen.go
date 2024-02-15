@@ -72,8 +72,7 @@ func (lis *Listener) listen(ctx context.Context) (retry bool, err error) {
 		return false, nil
 	}
 
-	for {
-		ev, err := d.NextEvent()
+	for ev, err := range d.Events() {
 		if err != nil {
 			if context.Cause(ctx) != nil {
 				return false, err
@@ -111,6 +110,8 @@ func (lis *Listener) listen(ctx context.Context) (retry bool, err error) {
 			}
 		}
 	}
+
+	panic("This should never happen.")
 }
 
 func isTemporary(err error) bool {
