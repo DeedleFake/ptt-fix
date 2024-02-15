@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/pprof"
 	"strings"
 
 	"deedles.dev/ptt-fix/internal/config"
@@ -151,7 +152,34 @@ func run(ctx context.Context) error {
 	return nil
 }
 
+func profile() func() {
+	path, ok := os.LookupEnv("PPROF")
+	if !ok {
+		return func() {}
+	}
+
+	file, err := os.Create(path)
+	if err != nil {
+		panic(err)
+	}
+
+	err = pprof.StartCPUProfile(file)
+	if err != nil {
+		panic(err)
+	}
+
+	return func() {
+		pprof.StopCPUProfile()
+		err := file.Close()
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
 func main() {
+	defer profile()()
+
 	usejournal, err := journal.StderrIsJournalStream()
 	logger := slog.New(glossy.Handler{
 		UseJournal: usejournal,
