@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
 	"unicode"
 
+	"deedles.dev/xiter"
 	"github.com/charmbracelet/lipgloss"
-	"golang.org/x/exp/slices"
 )
 
 var bufPool sync.Pool
@@ -80,15 +81,10 @@ func (h Handler) writer(r slog.Record) io.WriteCloser {
 
 func (h Handler) Handle(ctx context.Context, r slog.Record) error {
 	attrs := slices.Grow(h.attrs, r.NumAttrs())
-	r.Attrs(func(a slog.Attr) bool {
-		attrs = append(attrs, a)
-		return true
-	})
+	attrs = slices.AppendSeq(attrs, r.Attrs)
 	if h.group != "" {
 		group := make([]any, 0, len(attrs))
-		for _, a := range attrs {
-			group = append(group, a)
-		}
+		group = xiter.AppendTo(xiter.Map(xiter.OfSlice(attrs), func(a slog.Attr) any { return a }), group)
 		attrs = []slog.Attr{slog.Group(h.group, group...)}
 	}
 
