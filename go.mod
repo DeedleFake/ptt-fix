@@ -1,6 +1,6 @@
 module deedles.dev/ptt-fix
 
-go 1.22.0
+go 1.23.0
 
 require (
 	github.com/charmbracelet/lipgloss v0.9.1
