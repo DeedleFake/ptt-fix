@@ -45,26 +45,6 @@ func Logger(ctx context.Context) *slog.Logger {
 	return logger
 }
 
-func findDevices() ([]string, error) {
-	const dir = "/dev/input/by-id"
-
-	files, err := os.ReadDir(dir)
-	if err != nil {
-		return nil, err
-	}
-
-	devices := make([]string, 0, len(files))
-	for _, f := range files {
-		if f.IsDir() {
-			continue
-		}
-
-		devices = append(devices, filepath.Join(dir, f.Name()))
-	}
-
-	return devices, nil
-}
-
 func run(ctx context.Context) error {
 	logger := Logger(ctx)
 
