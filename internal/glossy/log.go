@@ -84,7 +84,7 @@ func (h Handler) Handle(ctx context.Context, r slog.Record) error {
 	attrs = slices.AppendSeq(attrs, r.Attrs)
 	if h.group != "" {
 		group := make([]any, 0, len(attrs))
-		group = xiter.AppendTo(xiter.Map(xiter.OfSlice(attrs), func(a slog.Attr) any { return a }), group)
+		group = slices.AppendSeq(group, xiter.Map(slices.Values(attrs), func(a slog.Attr) any { return a }))
 		attrs = []slog.Attr{slog.Group(h.group, group...)}
 	}
 
