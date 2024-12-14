@@ -88,7 +88,7 @@ func (lis *Listener) listen(ctx context.Context) (retry bool, err error) {
 			}
 
 			logger.Warn("read event", errKey, err)
-			continue
+			return true, err
 		}
 
 		if !ev.Is(evdev.EvKey, lis.Keycode) {
