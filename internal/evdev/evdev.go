@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"structs"
 	"syscall"
 	"unsafe"
 
@@ -152,6 +153,7 @@ func (d *Device) HasEventCode(t, code uint16) bool {
 
 func (d *Device) NextEvent() (InputEvent, error) {
 	type inputEvent struct {
+		_ structs.HostLayout
 		_ [16]byte // TODO: Add timestamp support.
 		InputEvent
 	}
@@ -165,6 +167,7 @@ func (d *Device) NextEvent() (InputEvent, error) {
 }
 
 type InputEvent struct {
+	_     structs.HostLayout
 	Type  uint16
 	Code  uint16
 	Value int32
