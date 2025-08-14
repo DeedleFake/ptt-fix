@@ -32,10 +32,10 @@ func handle(ctx context.Context, key config.Sym, ev <-chan event) error {
 			switch ev.Type {
 			case eventUp:
 				sender.Up()
-				logger.Debug("deactivated", "device", ev.Device)
+				logger.Info("deactivated", "device", ev.Device)
 			case eventDown:
 				sender.Down()
-				logger.Debug("activated", "device", ev.Device)
+				logger.Info("activated", "device", ev.Device)
 			default:
 				return fmt.Errorf("invalid event: %v", ev)
 			}

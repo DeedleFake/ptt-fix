@@ -14,8 +14,6 @@ import (
 	"strings"
 
 	"deedles.dev/ptt-fix/internal/config"
-	"deedles.dev/ptt-fix/internal/glossy"
-	"github.com/coreos/go-systemd/v22/journal"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -41,7 +39,10 @@ func WithLogger(ctx context.Context, logger *slog.Logger) context.Context {
 }
 
 func Logger(ctx context.Context) *slog.Logger {
-	logger, _ := ctx.Value(slogCtx{}).(*slog.Logger)
+	logger, ok := ctx.Value(slogCtx{}).(*slog.Logger)
+	if !ok {
+		return slog.Default()
+	}
 	return logger
 }
 
@@ -102,7 +103,6 @@ func run(ctx context.Context) error {
 	var liseg errgroup.Group
 	ev := make(chan event)
 	for _, dev := range c.Devices {
-		dev := dev
 		liseg.Go(func() error {
 			return Listener{
 				Device:  dev,
@@ -160,24 +160,12 @@ func profile() func() {
 func main() {
 	defer profile()()
 
-	usejournal, err := journal.StderrIsJournalStream()
-	logger := slog.New(glossy.Handler{
-		UseJournal: usejournal,
-		Level:      slog.LevelDebug,
-		ErrKey:     errKey,
-	})
-	if err != nil {
-		logger.Error("could not determine if output is to journal", errKey, err)
-	}
-
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	ctx = WithLogger(ctx, logger)
-
-	err = run(ctx)
+	err := run(ctx)
 	if err != nil {
-		logger.Error("fatal", errKey, err)
+		slog.Error("fatal", errKey, err)
 		os.Exit(1)
 	}
 }
