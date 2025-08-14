@@ -39,7 +39,10 @@ func WithLogger(ctx context.Context, logger *slog.Logger) context.Context {
 }
 
 func Logger(ctx context.Context) *slog.Logger {
-	logger, _ := ctx.Value(slogCtx{}).(*slog.Logger)
+	logger, ok := ctx.Value(slogCtx{}).(*slog.Logger)
+	if !ok {
+		return slog.Default()
+	}
 	return logger
 }
 
@@ -154,25 +157,15 @@ func profile() func() {
 	}
 }
 
-func logLevel() slog.Level {
-	if os.Getenv("PTT_FIX_DEBUG") == "1" {
-		return slog.LevelDebug
-	}
-	return slog.LevelInfo
-}
-
 func main() {
 	defer profile()()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel()}))
-	ctx = WithLogger(ctx, logger)
-
 	err := run(ctx)
 	if err != nil {
-		logger.Error("fatal", errKey, err)
+		slog.Error("fatal", errKey, err)
 		os.Exit(1)
 	}
 }
