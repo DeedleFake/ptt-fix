@@ -102,7 +102,6 @@ func run(ctx context.Context) error {
 	var liseg errgroup.Group
 	ev := make(chan event)
 	for _, dev := range c.Devices {
-		dev := dev
 		liseg.Go(func() error {
 			return Listener{
 				Device:  dev,

@@ -36,17 +36,6 @@ const (
 )
 
 const (
-	eviocgkeyBase = iocReadEBase | ((0x18 + iota) << iocNRShift)
-	eviocgledBase
-	eviocgsndBase
-	eviocgswBase
-)
-
-const (
-	eviocgabsBase = iocReadEBase | (unsafe.Sizeof(inputAbsInfo{}) << iocSizeShift)
-)
-
-const (
 	evCount  = 0x1F + 1
 	synCount = 0xF + 1
 	keyCount = 0x2FF + 1
