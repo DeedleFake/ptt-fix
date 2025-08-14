@@ -14,8 +14,6 @@ import (
 	"strings"
 
 	"deedles.dev/ptt-fix/internal/config"
-	"deedles.dev/ptt-fix/internal/glossy"
-	"github.com/coreos/go-systemd/v22/journal"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -156,25 +154,23 @@ func profile() func() {
 	}
 }
 
+func logLevel() slog.Level {
+	if os.Getenv("PTT_FIX_DEBUG") == "1" {
+		return slog.LevelDebug
+	}
+	return slog.LevelInfo
+}
+
 func main() {
 	defer profile()()
-
-	usejournal, err := journal.StderrIsJournalStream()
-	logger := slog.New(glossy.Handler{
-		UseJournal: usejournal,
-		Level:      slog.LevelDebug,
-		ErrKey:     errKey,
-	})
-	if err != nil {
-		logger.Error("could not determine if output is to journal", errKey, err)
-	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel()}))
 	ctx = WithLogger(ctx, logger)
 
-	err = run(ctx)
+	err := run(ctx)
 	if err != nil {
 		logger.Error("fatal", errKey, err)
 		os.Exit(1)
