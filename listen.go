@@ -114,6 +114,6 @@ func (lis *Listener) listen(ctx context.Context) (retry bool, err error) {
 }
 
 func isTemporary(err error) bool {
-	var errno unix.Errno
-	return errors.As(err, &errno) && errno.Temporary()
+	errno, ok := errors.AsType[unix.Errno](err)
+	return ok && errno.Temporary()
 }
