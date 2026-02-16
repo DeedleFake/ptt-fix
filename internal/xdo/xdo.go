@@ -26,15 +26,12 @@ func New() (*Xdo, bool) {
 	}
 
 	xdo := Xdo{p: p}
-	runtime.SetFinalizer(&xdo, (*Xdo).free)
+	runtime.AddCleanup(&xdo, free, p)
 	return &xdo, true
 }
 
-func (xdo *Xdo) free() {
-	if xdo.p != nil {
-		C.xdo_free(xdo.p)
-		xdo.p = nil
-	}
+func free(p *C.struct_xdo) {
+	C.xdo_free(p)
 }
 
 func (xdo *Xdo) SendKeysequenceWindowUp(w Window, keys string, delay time.Duration) bool {
