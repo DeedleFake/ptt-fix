@@ -1,10 +1,12 @@
 [Unit]
 Description=PTT Fix
-After=org.gnome.Session@wayland.service
+PartOf=graphical-session.target
+After=graphical-session.target
+ConditionEnvironment=XDG_SESSION_TYPE=wayland
 
 [Service]
 ExecStart=/usr/bin/ptt-fix
 Restart=on-failure
 
 [Install]
-WantedBy=gnome-session-wayland.target
+WantedBy=graphical-session.target
