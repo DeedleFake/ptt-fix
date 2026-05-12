@@ -2,7 +2,8 @@
 Description=PTT Fix
 PartOf=graphical-session.target
 After=graphical-session.target
-ConditionEnvironment=XDG_SESSION_TYPE=wayland
+ConditionEnvironment=|WAYLAND_DISPLAY
+ConditionEnvironment=|XDG_SESSION_TYPE=wayland
 
 [Service]
 ExecStart=/usr/bin/ptt-fix
