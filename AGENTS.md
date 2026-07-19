@@ -52,7 +52,7 @@ go fmt ./...
 
 - **Logging** — `log/slog` with structured key-value fields.
 - **Context** — pass `context.Context` as the first argument for cancelable / long-running work.
-- **Errors** — handle explicitly; wrap with `fmt.Errorf("...: %w", err)` when adding context.
+- **Errors** — handle explicitly; wrap with `fmt.Errorf("...: %w", err)` when adding context. Do not write `_ = f()` solely to discard a single-return `error` (or other single return); call `f()` without assigning if the return is intentionally unused, or handle the error properly.
 - **Modern Go** — match current stdlib helpers (`slices`, `maps`, `cmp`, `iter`, etc.) as used with the toolchain in `go.mod`.
 - **Imports** — goimports-style groups: standard library, third-party, then `deedles.dev/...`.
 - **Scope** — prefer small, focused changes. Do not reformat unrelated files or drive-by refactors.

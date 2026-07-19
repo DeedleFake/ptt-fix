@@ -78,11 +78,11 @@ type keySender struct {
 }
 
 func (s keySender) Up() {
-	_ = s.do.KeyUp(s.keycodes)
+	s.do.KeyUp(s.keycodes)
 }
 
 func (s keySender) Down() {
-	_ = s.do.KeyDown(s.keycodes)
+	s.do.KeyDown(s.keycodes)
 }
 
 type mouseSender struct {
@@ -91,9 +91,9 @@ type mouseSender struct {
 }
 
 func (s mouseSender) Up() {
-	_ = s.do.ButtonUp(s.button)
+	s.do.ButtonUp(s.button)
 }
 
 func (s mouseSender) Down() {
-	_ = s.do.ButtonDown(s.button)
+	s.do.ButtonDown(s.button)
 }
