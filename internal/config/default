@@ -21,6 +21,9 @@ key 56
 # aforementioned header file is `XKB_KEY_Alt_L`. Simply find the key
 # that you'd like and remove the `XKB_KEY_` prefix.
 #
+# Names are case-sensitive: `Alt_L` works; `alt_l` does not. Optional
+# prefixes `XKB_KEY_`, `XK_`, or `XF86XK_` are accepted and stripped.
+#
 # As a special case, the symbol may instead be in the form
 # `mouse <number>` where `<number>` is any integer. This will cause a
 # mouse button press to be sent instead. For example, `mouse 2` will

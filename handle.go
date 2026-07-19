@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 
 	"deedles.dev/ptt-fix/internal/config"
@@ -13,10 +13,11 @@ import (
 func handle(ctx context.Context, key config.Sym, ev <-chan event) error {
 	logger := Logger(ctx)
 
-	do, ok := xdo.New()
-	if !ok {
-		return errors.New("xdo initialization failed")
+	do, err := xdo.Open()
+	if err != nil {
+		return fmt.Errorf("xdo initialization failed: %w", err)
 	}
+	defer do.Close()
 
 	sender, err := newSender(do, key)
 	if err != nil {
@@ -29,53 +30,61 @@ func handle(ctx context.Context, key config.Sym, ev <-chan event) error {
 			return context.Cause(ctx)
 
 		case ev := <-ev:
-			switch ev.Type {
-			case eventUp:
-				sender.Up()
-				logger.Info("deactivated", "device", ev.Device)
-			case eventDown:
-				sender.Down()
-				logger.Info("activated", "device", ev.Device)
-			default:
-				return fmt.Errorf("invalid event: %v", ev)
+			if err := applyEvent(logger, sender, ev); err != nil {
+				return err
 			}
 		}
 	}
 }
 
+// applyEvent dispatches a single up/down event through the sender.
+// Injection errors are returned so the process can exit (and be restarted).
+func applyEvent(logger *slog.Logger, s sender, ev event) error {
+	switch ev.Type {
+	case eventUp:
+		if err := s.Up(); err != nil {
+			return fmt.Errorf("deactivate (%s): %w", ev.Device, err)
+		}
+		logger.Info("deactivated", "device", ev.Device)
+		return nil
+	case eventDown:
+		if err := s.Down(); err != nil {
+			return fmt.Errorf("activate (%s): %w", ev.Device, err)
+		}
+		logger.Info("activated", "device", ev.Device)
+		return nil
+	default:
+		return fmt.Errorf("invalid event: %v", ev)
+	}
+}
+
 type sender interface {
-	Up()
-	Down()
+	Up() error
+	Down() error
 }
 
 func newSender(do *xdo.Xdo, sym config.Sym) (sender, error) {
 	switch sym.Type {
 	case "key":
-		return keySender{do, sym.Val}, nil
+		b, err := do.BindKeys(sym.Val)
+		if err != nil {
+			return nil, fmt.Errorf("resolve keysym %q: %w", sym.Val, err)
+		}
+		return b, nil
 
 	case "mouse":
 		v, err := strconv.ParseInt(sym.Val, 0, 0)
 		if err != nil {
 			return nil, fmt.Errorf("invalid mouse button: %w", err)
 		}
-		return mouseSender{do, int(v)}, nil
+		if err := xdo.ValidButton(int(v)); err != nil {
+			return nil, err
+		}
+		return mouseSender{do: do, button: int(v)}, nil
 
 	default:
 		return nil, fmt.Errorf("invalid sym type: %q", sym.Type)
 	}
-}
-
-type keySender struct {
-	do  *xdo.Xdo
-	sym string
-}
-
-func (s keySender) Up() {
-	s.do.SendKeysequenceWindowUp(xdo.CurrentWindow, s.sym, 0)
-}
-
-func (s keySender) Down() {
-	s.do.SendKeysequenceWindowDown(xdo.CurrentWindow, s.sym, 0)
 }
 
 type mouseSender struct {
@@ -83,10 +92,10 @@ type mouseSender struct {
 	button int
 }
 
-func (s mouseSender) Up() {
-	s.do.MouseUp(xdo.CurrentWindow, s.button)
+func (s mouseSender) Up() error {
+	return s.do.ButtonUp(s.button)
 }
 
-func (s mouseSender) Down() {
-	s.do.MouseDown(xdo.CurrentWindow, s.button)
+func (s mouseSender) Down() error {
+	return s.do.ButtonDown(s.button)
 }

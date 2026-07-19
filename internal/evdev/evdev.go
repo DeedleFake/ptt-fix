@@ -184,15 +184,6 @@ type InputID struct {
 	Version uint16
 }
 
-type inputAbsInfo struct {
-	Value      int32
-	Minimum    int32
-	Maximum    int32
-	Fuzz       int32
-	Flat       int32
-	Resolution int32
-}
-
 func control(conn syscall.RawConn, f func(uintptr) error) error {
 	var ferr error
 	err := conn.Control(func(fd uintptr) { ferr = f(fd) })

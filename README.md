@@ -8,18 +8,20 @@ Installation
 
 If you are on Arch Linux, ptt-fix is available from the AUR as [`ptt-fix`][aur].
 
-To install manually, you will need `libxdo` installed. Then, simply run
+To install manually, run
 
 ```bash
 $ go install deedles.dev/ptt-fix@latest
 ```
 
-A manual installation of this kind will need to be run as root as regular users don't normally, and shouldn't, have read access to the devices in `/dev/input`.
+The build is pure Go (no cgo). At runtime you need access to an X display (typically XWayland under a Wayland session) so keys can be injected via the XTest extension, and permission to read the configured input devices under `/dev/input` (often requiring root or membership in an input group).
 
 Usage
 -----
 
 The default config uses left alt for push-to-talk, waits 10 seconds before retrying a device that wasn't working, and uses all devices that it finds in `/dev/input/by-id/`. If you would like to modify these settings, first run `ptt-fix -createconfig`. This will write the default config to a file, probably `$HOME/.config/ptt-fix/config` and print the path to that file. The file has lots of comments, so simply open it in the text editor of your choice and modify it however you would like.
+
+Key symbols in the config (`sym`) are **case-sensitive** X11/xkb keysym names (for example `Alt_L`, not `alt_l`). Optional prefixes such as `XKB_KEY_` or `XK_` may be included and are stripped before lookup.
 
 Donate
 ------
