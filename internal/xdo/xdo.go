@@ -22,6 +22,7 @@ package xdo
 import (
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/jezek/xgb"
@@ -65,6 +66,7 @@ func Open() (*Xdo, error) {
 	setup := xproto.Setup(conn)
 	if setup == nil {
 		conn.Close()
+		//lint:ignore ST1005 "X" is a proper noun (X Window System)
 		return nil, fmt.Errorf("X setup info unavailable")
 	}
 
@@ -163,8 +165,8 @@ func (x *Xdo) KeyUp(keycodes []byte) error {
 	if err := x.ready(); err != nil {
 		return err
 	}
-	for i := len(keycodes) - 1; i >= 0; i-- {
-		if err := x.fakeKey(xproto.KeyRelease, keycodes[i]); err != nil {
+	for _, keycode := range slices.Backward(keycodes) {
+		if err := x.fakeKey(xproto.KeyRelease, keycode); err != nil {
 			return err
 		}
 	}
