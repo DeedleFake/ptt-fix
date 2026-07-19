@@ -26,18 +26,7 @@ type Xdo struct {
 	keyMap            []xproto.Keysym
 }
 
-// New connects to the default X display ($DISPLAY) and initializes XTest.
-// Returns false if the connection or XTest setup fails (same success/failure
-// surface as the previous libxdo wrapper).
-func New() (*Xdo, bool) {
-	x, err := Open()
-	if err != nil {
-		return nil, false
-	}
-	return x, true
-}
-
-// Open connects to the default X display and initializes the XTest extension.
+// Open connects to the default X display ($DISPLAY) and initializes the XTest extension.
 func Open() (*Xdo, error) {
 	conn, err := xgb.NewConn()
 	if err != nil {

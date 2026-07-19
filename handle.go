@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 
@@ -13,9 +12,9 @@ import (
 func handle(ctx context.Context, key config.Sym, ev <-chan event) error {
 	logger := Logger(ctx)
 
-	do, ok := xdo.New()
-	if !ok {
-		return errors.New("xdo initialization failed")
+	do, err := xdo.Open()
+	if err != nil {
+		return fmt.Errorf("xdo initialization failed: %w", err)
 	}
 
 	sender, err := newSender(do, key)
