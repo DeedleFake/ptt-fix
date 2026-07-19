@@ -51,14 +51,21 @@ type sender interface {
 func newSender(do *xdo.Xdo, sym config.Sym) (sender, error) {
 	switch sym.Type {
 	case "key":
-		return keySender{do, sym.Val}, nil
+		kcs, err := do.Keycodes(sym.Val)
+		if err != nil {
+			return nil, fmt.Errorf("resolve keysym %q: %w", sym.Val, err)
+		}
+		return keySender{do: do, keycodes: kcs}, nil
 
 	case "mouse":
 		v, err := strconv.ParseInt(sym.Val, 0, 0)
 		if err != nil {
 			return nil, fmt.Errorf("invalid mouse button: %w", err)
 		}
-		return mouseSender{do, int(v)}, nil
+		if v < 1 || v > 255 {
+			return nil, fmt.Errorf("invalid mouse button: %d", v)
+		}
+		return mouseSender{do: do, button: int(v)}, nil
 
 	default:
 		return nil, fmt.Errorf("invalid sym type: %q", sym.Type)
@@ -66,16 +73,16 @@ func newSender(do *xdo.Xdo, sym config.Sym) (sender, error) {
 }
 
 type keySender struct {
-	do  *xdo.Xdo
-	sym string
+	do       *xdo.Xdo
+	keycodes []byte
 }
 
 func (s keySender) Up() {
-	s.do.SendKeysequenceWindowUp(xdo.CurrentWindow, s.sym, 0)
+	_ = s.do.KeyUp(s.keycodes)
 }
 
 func (s keySender) Down() {
-	s.do.SendKeysequenceWindowDown(xdo.CurrentWindow, s.sym, 0)
+	_ = s.do.KeyDown(s.keycodes)
 }
 
 type mouseSender struct {
@@ -84,9 +91,9 @@ type mouseSender struct {
 }
 
 func (s mouseSender) Up() {
-	s.do.MouseUp(xdo.CurrentWindow, s.button)
+	_ = s.do.ButtonUp(s.button)
 }
 
 func (s mouseSender) Down() {
-	s.do.MouseDown(xdo.CurrentWindow, s.button)
+	_ = s.do.ButtonDown(s.button)
 }

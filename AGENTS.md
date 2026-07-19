@@ -9,9 +9,9 @@ Instructions for AI coding agents working in this repository.
 Architecture:
 
 1. **Listen** — read a configured key from one or more input devices via Linux evdev (`/dev/input`).
-2. **Inject** — synthesize the configured key or mouse button through **X** (libxdo / XTest) so X11/XWayland apps receive it.
+2. **Inject** — synthesize the configured key or mouse button through the **X protocol / XTest** (pure-Go X client) so X11/XWayland apps receive it.
 
-The X injection path is intentional. Kernel-level injection (uinput and similar) does not preserve this bridge: it routes through the compositor to the focused client, not through the X server path that unfocused X apps use for PTT. Do not replace libxdo/XTest with uinput unless the design goal changes.
+The X injection path is intentional. Kernel-level injection (uinput and similar) does not preserve this bridge: it routes through the compositor to the focused client, not through the X server path that unfocused X apps use for PTT. Do not replace XTest with uinput unless the design goal changes.
 
 ## Technology stack
 
@@ -19,7 +19,8 @@ The X injection path is intentional. Kernel-level injection (uinput and similar)
 |-------|--------|
 | Language | Go — see `go.mod` for the required toolchain |
 | Module | `deedles.dev/ptt-fix` |
-| Build | cgo; needs `libxdo` (pkg-config) at build time |
+| Build | pure Go; `CGO_ENABLED=0` supported |
+| X client | pure-Go XGB (`github.com/jezek/xgb`) + XTest |
 | Runtime | Linux input devices; X display (typically XWayland) for injection |
 
 Do not pin toolchain or dependency versions in this file (they go stale). Prefer “as specified in `go.mod`” or unversioned names.
@@ -30,9 +31,9 @@ Do not pin toolchain or dependency versions in this file (they go stale). Prefer
 |------|------|
 | `ptt-fix.go` | Entry point, flags, config load, orchestration |
 | `listen.go` | Per-device evdev listener and retry loop |
-| `handle.go` | Event handling; key/mouse senders via xdo |
-| `internal/evdev` | Pure-Go evdev (syscalls / ioctls; no cgo) |
-| `internal/xdo` | Thin cgo wrapper around libxdo |
+| `handle.go` | Event handling; key/mouse senders via XTest |
+| `internal/evdev` | Pure-Go evdev (syscalls / ioctls) |
+| `internal/xdo` | Pure-Go X/XTest injection + keysym name table |
 | `internal/config` | Config parse + embedded default config |
 | `ptt-fix.service` | Example systemd unit |
 
@@ -45,7 +46,7 @@ go vet ./...
 go fmt ./...
 ```
 
-`go test` already compiles packages; do not run a separate `go build` only to check that the project compiles. Building or installing still requires a C toolchain and libxdo development headers because of cgo.
+`go test` already compiles packages; do not run a separate `go build` only to check that the project compiles. Prefer verifying with `CGO_ENABLED=0` when changing the injection layer.
 
 ## Code style and conventions
 
@@ -55,7 +56,7 @@ go fmt ./...
 - **Modern Go** — match current stdlib helpers (`slices`, `maps`, `cmp`, `iter`, etc.) as used with the toolchain in `go.mod`.
 - **Imports** — goimports-style groups: standard library, third-party, then `deedles.dev/...`.
 - **Scope** — prefer small, focused changes. Do not reformat unrelated files or drive-by refactors.
-- **cgo** — keep `internal/xdo` thin; avoid spreading cgo into other packages.
+- **No cgo** — keep the tree free of `import "C"` / `#cgo`; injection stays pure-Go X/XTest.
 
 ## Agent guidelines
 
