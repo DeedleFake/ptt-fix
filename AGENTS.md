@@ -42,12 +42,15 @@ Do not pin toolchain or dependency versions in this file (they go stale). Prefer
 
 ```bash
 go mod download
+go mod tidy
 go test ./...
 go vet ./...
 go fmt ./...
 ```
 
 `go test` already compiles packages; do not run a separate `go build` only to check that the project compiles. Prefer verifying with `CGO_ENABLED=0` when changing the injection layer.
+
+After changing dependencies or tools (for example `go get`, `go get -tool`), run `go mod tidy` to clean up `go.mod` and `go.sum` so they only list needed modules and checksums.
 
 Regenerate the keysym table after updating X11 headers (requires libX11 keysym headers, e.g. under `/usr/include/X11`):
 
