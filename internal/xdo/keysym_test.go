@@ -214,6 +214,7 @@ func TestKeycodeForKeysym_baseLevelOnly(t *testing.T) {
 
 func TestKeycodes_usesBaseLevelPolicy(t *testing.T) {
 	// Keycodes() wires name lookup to base-level keycode resolution.
+	// No conn: uses the synthetic map as-is (live connections re-fetch first).
 	const symA = xproto.Keysym(0x61)
 	x := &Xdo{
 		min:               8,
@@ -231,6 +232,113 @@ func TestKeycodes_usesBaseLevelPolicy(t *testing.T) {
 	_, err = x.Keycodes("A")
 	if err == nil {
 		t.Fatal("Keycodes(A) must fail (shifted-only on this map)")
+	}
+}
+
+func TestKeycodes_seesMapUpdatesWithoutConn(t *testing.T) {
+	// When the map is replaced (as refreshKeyboardMap does on a live display),
+	// subsequent Keycodes calls resolve against the new table.
+	const (
+		symAlt  = xproto.Keysym(0xffe9)
+		symCtrl = xproto.Keysym(0xffe3)
+	)
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{symAlt, symCtrl},
+	}
+	kcs, err := x.Keycodes("Alt_L")
+	if err != nil || len(kcs) != 1 || kcs[0] != 8 {
+		t.Fatalf("initial Alt_L = %v, %v; want [8]", kcs, err)
+	}
+	x.keyMap = []xproto.Keysym{symCtrl, symAlt}
+	kcs, err = x.Keycodes("Alt_L")
+	if err != nil || len(kcs) != 1 || kcs[0] != 9 {
+		t.Fatalf("after remap Alt_L = %v, %v; want [9]", kcs, err)
+	}
+}
+
+func TestKeyBinding_upReleasesKeycodesFromDown(t *testing.T) {
+	// Mid-hold map change must not change which keycodes Up releases.
+	const (
+		symAlt  = xproto.Keysym(0xffe9)
+		symCtrl = xproto.Keysym(0xffe3)
+	)
+	var events []struct {
+		evType byte
+		detail byte
+	}
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{symAlt, symCtrl},
+		input: func(evType, detail byte) error {
+			events = append(events, struct {
+				evType byte
+				detail byte
+			}{evType, detail})
+			return nil
+		},
+	}
+	b, err := x.BindKeys("Alt_L")
+	if err != nil {
+		t.Fatalf("BindKeys: %v", err)
+	}
+	if err := b.Down(); err != nil {
+		t.Fatalf("Down: %v", err)
+	}
+	// Swap so Alt_L would now resolve to keycode 9.
+	x.keyMap = []xproto.Keysym{symCtrl, symAlt}
+	if err := b.Up(); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	want := []struct {
+		evType byte
+		detail byte
+	}{
+		{xproto.KeyPress, 8},
+		{xproto.KeyRelease, 8},
+	}
+	if len(events) != len(want) {
+		t.Fatalf("events = %v, want %v", events, want)
+	}
+	for i := range want {
+		if events[i] != want[i] {
+			t.Fatalf("event[%d] = %+v, want %+v", i, events[i], want[i])
+		}
+	}
+}
+
+func TestKeyBinding_downUsesCurrentMap(t *testing.T) {
+	const (
+		symAlt  = xproto.Keysym(0xffe9)
+		symCtrl = xproto.Keysym(0xffe3)
+	)
+	var pressed []byte
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{symAlt, symCtrl},
+		input: func(evType, detail byte) error {
+			if evType == xproto.KeyPress {
+				pressed = append(pressed, detail)
+			}
+			return nil
+		},
+	}
+	b, err := x.BindKeys("Alt_L")
+	if err != nil {
+		t.Fatalf("BindKeys: %v", err)
+	}
+	x.keyMap = []xproto.Keysym{symCtrl, symAlt}
+	if err := b.Down(); err != nil {
+		t.Fatalf("Down: %v", err)
+	}
+	if len(pressed) != 1 || pressed[0] != 9 {
+		t.Fatalf("pressed = %v, want [9] after remap", pressed)
 	}
 }
 
@@ -349,6 +457,48 @@ func TestKeyDown_partialFailureMultipleReleasesReverseOrder(t *testing.T) {
 	}
 	if len(events) != len(want) {
 		t.Fatalf("events len = %d, want %d: %v", len(events), len(want), events)
+	}
+	for i := range want {
+		if events[i] != want[i] {
+			t.Fatalf("event[%d] = %+v, want %+v", i, events[i], want[i])
+		}
+	}
+}
+
+func TestKeyUp_partialFailureContinuesReleases(t *testing.T) {
+	releaseErr := errors.New("release failed on middle key")
+	var events []struct {
+		evType byte
+		detail byte
+	}
+	x := &Xdo{
+		input: func(evType, detail byte) error {
+			events = append(events, struct {
+				evType byte
+				detail byte
+			}{evType, detail})
+			// Reverse order: 30, 20, 10 — fail on 20, still release 10.
+			if evType == xproto.KeyRelease && detail == 20 {
+				return releaseErr
+			}
+			return nil
+		},
+	}
+
+	err := x.KeyUp([]byte{10, 20, 30})
+	if !errors.Is(err, releaseErr) {
+		t.Fatalf("KeyUp error = %v, want releaseErr", err)
+	}
+	want := []struct {
+		evType byte
+		detail byte
+	}{
+		{xproto.KeyRelease, 30},
+		{xproto.KeyRelease, 20},
+		{xproto.KeyRelease, 10},
+	}
+	if len(events) != len(want) {
+		t.Fatalf("events = %v (len %d), want %d", events, len(events), len(want))
 	}
 	for i := range want {
 		if events[i] != want[i] {

@@ -58,7 +58,7 @@ Regenerate the keysym table after updating X11 headers (requires libX11 keysym h
 go generate ./internal/xdo
 ```
 
-The committed `internal/xdo/keysyms.go` is enough for builds/tests without those headers. Name lookup is exact (case-sensitive) after optional `XKB_KEY_` / `XK_` / `XF86XK_` prefix strip. Keycode resolution uses only the base column of the server map (no automatic Shift/AltGr).
+The committed `internal/xdo/keysyms.go` is enough for builds/tests without those headers. Name lookup is exact (case-sensitive) after optional `XKB_KEY_` / `XK_` / `XF86XK_` prefix strip. Keycode resolution uses only the base column of the server map (no automatic Shift/AltGr). The server keyboard map is reloaded on each keycode resolution so layout changes apply without restart; hold injection ([BindKeys]) releases the keycodes from the matching Down if the map changes mid-hold.
 
 ## Code style and conventions
 

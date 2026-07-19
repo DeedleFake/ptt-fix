@@ -17,6 +17,11 @@
 // map for each keycode. This package does not synthesize Shift/AltGr or other
 // modifiers. A keysym that appears only on a non-base level is rejected with an
 // error rather than injected as a bare keycode that would type the wrong symbol.
+//
+// [Xdo.Keycodes] reloads the server keyboard map on every call (when connected
+// to a live display), so layout and remapping changes are visible without
+// reconnecting. Prefer [Xdo.BindKeys] for hold-style injection: it re-resolves
+// on Down but releases the same keycodes on Up if the map changed mid-hold.
 package xdo
 
 import (
@@ -51,7 +56,8 @@ type Xdo struct {
 	input func(evType, detail byte) error
 }
 
-// Open connects to the default X display ($DISPLAY) and initializes the XTest extension.
+// Open connects to the default X display ($DISPLAY), initializes the XTest
+// extension, and loads the server keyboard map for [Xdo.Keycodes] lookups.
 func Open() (*Xdo, error) {
 	conn, err := xgb.NewConn()
 	if err != nil {
@@ -63,28 +69,10 @@ func Open() (*Xdo, error) {
 		return nil, fmt.Errorf("init XTEST extension: %w", err)
 	}
 
-	setup := xproto.Setup(conn)
-	if setup == nil {
+	x := &Xdo{conn: conn}
+	if err := x.refreshKeyboardMap(); err != nil {
 		conn.Close()
-		//lint:ignore ST1005 "X" is a proper noun (X Window System)
-		return nil, fmt.Errorf("X setup info unavailable")
-	}
-
-	min, max := setup.MinKeycode, setup.MaxKeycode
-	// X keycodes are bytes; max-min+1 fits in a byte on real servers.
-	count := byte(max - min + 1)
-	reply, err := xproto.GetKeyboardMapping(conn, min, count).Reply()
-	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("get keyboard mapping: %w", err)
-	}
-
-	x := &Xdo{
-		conn:              conn,
-		min:               min,
-		max:               max,
-		keysymsPerKeycode: reply.KeysymsPerKeycode,
-		keyMap:            reply.Keysyms,
+		return nil, err
 	}
 	x.cleanup = runtime.AddCleanup(x, (*xgb.Conn).Close, conn)
 	return x, nil
@@ -113,11 +101,18 @@ func KeysymByName(name string) (uint32, bool) {
 }
 
 // Keycodes resolves a keysym name (or libxdo-style sequence of names joined
-// by '+') to one or more X keycodes using the server keyboard map. Only base
-// column mappings are used (see package docs).
+// by '+') to one or more X keycodes using the current server keyboard map.
+// When a live connection is present, the map is reloaded from the server first
+// so layout changes are observed. Only base column mappings are used (see
+// package docs).
 func (x *Xdo) Keycodes(keys string) ([]byte, error) {
 	if x == nil {
 		return nil, fmt.Errorf("xdo connection closed")
+	}
+	if x.conn != nil {
+		if err := x.refreshKeyboardMap(); err != nil {
+			return nil, err
+		}
 	}
 
 	parts := splitKeysequence(keys)
@@ -140,6 +135,88 @@ func (x *Xdo) Keycodes(keys string) ([]byte, error) {
 	return out, nil
 }
 
+// KeyBinding injects a named key sequence for hold-style use (press on Down,
+// release on Up). Down re-resolves names against the current server map; Up
+// releases the keycodes that were actually pressed so a mid-hold remap cannot
+// leave the wrong keys stuck or release unrelated ones.
+type KeyBinding struct {
+	x    *Xdo
+	keys string
+	held []byte
+}
+
+// BindKeys validates keys against the current map and returns a [KeyBinding].
+func (x *Xdo) BindKeys(keys string) (*KeyBinding, error) {
+	if x == nil {
+		return nil, fmt.Errorf("xdo connection closed")
+	}
+	if _, err := x.Keycodes(keys); err != nil {
+		return nil, err
+	}
+	return &KeyBinding{x: x, keys: keys}, nil
+}
+
+// Down resolves the binding's key names to keycodes and sends presses.
+func (b *KeyBinding) Down() error {
+	if b == nil || b.x == nil {
+		return fmt.Errorf("xdo connection closed")
+	}
+	kcs, err := b.x.Keycodes(b.keys)
+	if err != nil {
+		return err
+	}
+	if err := b.x.KeyDown(kcs); err != nil {
+		return err
+	}
+	b.held = kcs
+	return nil
+}
+
+// Up releases the keycodes from the last successful Down. If there is no held
+// press (for example Down never succeeded), it resolves and releases using the
+// current map as a best-effort fallback.
+func (b *KeyBinding) Up() error {
+	if b == nil || b.x == nil {
+		return fmt.Errorf("xdo connection closed")
+	}
+	kcs := b.held
+	if kcs == nil {
+		var err error
+		kcs, err = b.x.Keycodes(b.keys)
+		if err != nil {
+			return err
+		}
+	}
+	err := b.x.KeyUp(kcs)
+	b.held = nil
+	return err
+}
+
+// refreshKeyboardMap loads min/max keycodes and the full keysym table from the
+// connected X server. No-op for tests that construct an *Xdo without a conn.
+func (x *Xdo) refreshKeyboardMap() error {
+	if x.conn == nil {
+		return fmt.Errorf("xdo connection closed")
+	}
+	setup := xproto.Setup(x.conn)
+	if setup == nil {
+		//lint:ignore ST1005 "X" is a proper noun (X Window System)
+		return fmt.Errorf("X setup info unavailable")
+	}
+	min, max := setup.MinKeycode, setup.MaxKeycode
+	// X keycodes are bytes; max-min+1 fits in a byte on real servers (min ≥ 8).
+	count := byte(max - min + 1)
+	reply, err := xproto.GetKeyboardMapping(x.conn, min, count).Reply()
+	if err != nil {
+		return fmt.Errorf("get keyboard mapping: %w", err)
+	}
+	x.min = min
+	x.max = max
+	x.keysymsPerKeycode = reply.KeysymsPerKeycode
+	x.keyMap = reply.Keysyms
+	return nil
+}
+
 // KeyDown sends XTest key presses for pre-resolved keycodes.
 // If a multi-key sequence fails after some keys were pressed, those already
 // pressed keys are best-effort released in reverse order before the press
@@ -149,10 +226,10 @@ func (x *Xdo) KeyDown(keycodes []byte) error {
 		return err
 	}
 	for i, kc := range keycodes {
-		if err := x.fakeKey(xproto.KeyPress, kc); err != nil {
+		if err := x.fakeInput(xproto.KeyPress, kc); err != nil {
 			for j := i - 1; j >= 0; j-- {
 				// Best-effort; preserve the original press error.
-				x.fakeKey(xproto.KeyRelease, keycodes[j])
+				x.fakeInput(xproto.KeyRelease, keycodes[j])
 			}
 			return err
 		}
@@ -161,16 +238,20 @@ func (x *Xdo) KeyDown(keycodes []byte) error {
 }
 
 // KeyUp sends XTest key releases for pre-resolved keycodes (reverse order).
+// If a release fails, remaining keys are still best-effort released and the
+// first failure is returned (so a mid-chord X error does not leave other
+// modifiers stuck down).
 func (x *Xdo) KeyUp(keycodes []byte) error {
 	if err := x.ready(); err != nil {
 		return err
 	}
+	var first error
 	for _, keycode := range slices.Backward(keycodes) {
-		if err := x.fakeKey(xproto.KeyRelease, keycode); err != nil {
-			return err
+		if err := x.fakeInput(xproto.KeyRelease, keycode); err != nil && first == nil {
+			first = err
 		}
 	}
-	return nil
+	return first
 }
 
 // ValidButton reports whether button is a valid X button number (1–255).
@@ -189,7 +270,7 @@ func (x *Xdo) ButtonDown(button int) error {
 	if err := x.ready(); err != nil {
 		return err
 	}
-	return x.fakeButton(xproto.ButtonPress, byte(button))
+	return x.fakeInput(xproto.ButtonPress, byte(button))
 }
 
 // ButtonUp sends an XTest mouse button release.
@@ -200,7 +281,7 @@ func (x *Xdo) ButtonUp(button int) error {
 	if err := x.ready(); err != nil {
 		return err
 	}
-	return x.fakeButton(xproto.ButtonRelease, byte(button))
+	return x.fakeInput(xproto.ButtonRelease, byte(button))
 }
 
 func (x *Xdo) ready() error {
@@ -208,14 +289,6 @@ func (x *Xdo) ready() error {
 		return fmt.Errorf("xdo connection closed")
 	}
 	return nil
-}
-
-func (x *Xdo) fakeKey(evType byte, keycode byte) error {
-	return x.fakeInput(evType, keycode)
-}
-
-func (x *Xdo) fakeButton(evType byte, button byte) error {
-	return x.fakeInput(evType, button)
 }
 
 func (x *Xdo) fakeInput(evType byte, detail byte) error {

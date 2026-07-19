@@ -17,6 +17,7 @@ func handle(ctx context.Context, key config.Sym, ev <-chan event) error {
 	if err != nil {
 		return fmt.Errorf("xdo initialization failed: %w", err)
 	}
+	defer do.Close()
 
 	sender, err := newSender(do, key)
 	if err != nil {
@@ -65,11 +66,11 @@ type sender interface {
 func newSender(do *xdo.Xdo, sym config.Sym) (sender, error) {
 	switch sym.Type {
 	case "key":
-		kcs, err := do.Keycodes(sym.Val)
+		b, err := do.BindKeys(sym.Val)
 		if err != nil {
 			return nil, fmt.Errorf("resolve keysym %q: %w", sym.Val, err)
 		}
-		return keySender{do: do, keycodes: kcs}, nil
+		return b, nil
 
 	case "mouse":
 		v, err := strconv.ParseInt(sym.Val, 0, 0)
@@ -84,19 +85,6 @@ func newSender(do *xdo.Xdo, sym config.Sym) (sender, error) {
 	default:
 		return nil, fmt.Errorf("invalid sym type: %q", sym.Type)
 	}
-}
-
-type keySender struct {
-	do       *xdo.Xdo
-	keycodes []byte
-}
-
-func (s keySender) Up() error {
-	return s.do.KeyUp(s.keycodes)
-}
-
-func (s keySender) Down() error {
-	return s.do.KeyDown(s.keycodes)
 }
 
 type mouseSender struct {
