@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strconv"
 
 	"deedles.dev/ptt-fix/internal/config"
@@ -28,23 +29,37 @@ func handle(ctx context.Context, key config.Sym, ev <-chan event) error {
 			return context.Cause(ctx)
 
 		case ev := <-ev:
-			switch ev.Type {
-			case eventUp:
-				sender.Up()
-				logger.Info("deactivated", "device", ev.Device)
-			case eventDown:
-				sender.Down()
-				logger.Info("activated", "device", ev.Device)
-			default:
-				return fmt.Errorf("invalid event: %v", ev)
+			if err := applyEvent(logger, sender, ev); err != nil {
+				return err
 			}
 		}
 	}
 }
 
+// applyEvent dispatches a single up/down event through the sender.
+// Injection errors are returned so the process can exit (and be restarted).
+func applyEvent(logger *slog.Logger, s sender, ev event) error {
+	switch ev.Type {
+	case eventUp:
+		if err := s.Up(); err != nil {
+			return fmt.Errorf("deactivate (%s): %w", ev.Device, err)
+		}
+		logger.Info("deactivated", "device", ev.Device)
+		return nil
+	case eventDown:
+		if err := s.Down(); err != nil {
+			return fmt.Errorf("activate (%s): %w", ev.Device, err)
+		}
+		logger.Info("activated", "device", ev.Device)
+		return nil
+	default:
+		return fmt.Errorf("invalid event: %v", ev)
+	}
+}
+
 type sender interface {
-	Up()
-	Down()
+	Up() error
+	Down() error
 }
 
 func newSender(do *xdo.Xdo, sym config.Sym) (sender, error) {
@@ -61,8 +76,8 @@ func newSender(do *xdo.Xdo, sym config.Sym) (sender, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid mouse button: %w", err)
 		}
-		if v < 1 || v > 255 {
-			return nil, fmt.Errorf("invalid mouse button: %d", v)
+		if err := validMouseButton(int(v)); err != nil {
+			return nil, err
 		}
 		return mouseSender{do: do, button: int(v)}, nil
 
@@ -71,17 +86,24 @@ func newSender(do *xdo.Xdo, sym config.Sym) (sender, error) {
 	}
 }
 
+func validMouseButton(button int) error {
+	if button < 1 || button > 255 {
+		return fmt.Errorf("invalid mouse button: %d", button)
+	}
+	return nil
+}
+
 type keySender struct {
 	do       *xdo.Xdo
 	keycodes []byte
 }
 
-func (s keySender) Up() {
-	s.do.KeyUp(s.keycodes)
+func (s keySender) Up() error {
+	return s.do.KeyUp(s.keycodes)
 }
 
-func (s keySender) Down() {
-	s.do.KeyDown(s.keycodes)
+func (s keySender) Down() error {
+	return s.do.KeyDown(s.keycodes)
 }
 
 type mouseSender struct {
@@ -89,10 +111,10 @@ type mouseSender struct {
 	button int
 }
 
-func (s mouseSender) Up() {
-	s.do.ButtonUp(s.button)
+func (s mouseSender) Up() error {
+	return s.do.ButtonUp(s.button)
 }
 
-func (s mouseSender) Down() {
-	s.do.ButtonDown(s.button)
+func (s mouseSender) Down() error {
+	return s.do.ButtonDown(s.button)
 }

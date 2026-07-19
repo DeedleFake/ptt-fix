@@ -33,7 +33,8 @@ Do not pin toolchain or dependency versions in this file (they go stale). Prefer
 | `listen.go` | Per-device evdev listener and retry loop |
 | `handle.go` | Event handling; key/mouse senders via XTest |
 | `internal/evdev` | Pure-Go evdev (syscalls / ioctls) |
-| `internal/xdo` | Pure-Go X/XTest injection + keysym name table |
+| `internal/xdo` | Pure-Go X/XTest injection + generated keysym name table |
+| `internal/xdo/gen_keysyms.go` | Generator for `keysyms.go` (`//go:build ignore`) |
 | `internal/config` | Config parse + embedded default config |
 | `ptt-fix.service` | Example systemd unit |
 
@@ -47,6 +48,14 @@ go fmt ./...
 ```
 
 `go test` already compiles packages; do not run a separate `go build` only to check that the project compiles. Prefer verifying with `CGO_ENABLED=0` when changing the injection layer.
+
+Regenerate the keysym table after updating X11 headers (requires libX11 keysym headers, e.g. under `/usr/include/X11`):
+
+```bash
+go generate ./internal/xdo
+```
+
+The committed `internal/xdo/keysyms.go` is enough for builds/tests without those headers. Name lookup is exact after optional `XKB_KEY_` / `XK_` / `XF86XK_` prefix strip. Keycode resolution uses only the base column of the server map (no automatic Shift/AltGr).
 
 ## Code style and conventions
 

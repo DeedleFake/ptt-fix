@@ -1,20 +1,34 @@
 // Package xdo synthesizes keyboard and mouse input through the X protocol
 // (XTest), so X11/XWayland clients can receive push-to-talk events.
 //
-// This package is pure Go (no cgo). It replaces the former libxdo wrapper
-// while accepting the same keysym name strings used in config.
+// This package is pure Go (no cgo). Keysym names in config are resolved with a
+// generated client-side name table (see keysyms.go and go:generate); the X
+// protocol does not provide name→keysym lookup.
+//
+// # Keysym names
+//
+// Names match the usual X11 / xkbcommon macros with optional prefixes stripped
+// (XKB_KEY_, XK_, XF86XK_). Lookup is exact after that strip — no case folding.
+//
+// # Keycode resolution
+//
+// Keycodes are taken only from the base column (index 0) of the server keyboard
+// map for each keycode. This package does not synthesize Shift/AltGr or other
+// modifiers. A keysym that appears only on a non-base level is rejected with an
+// error rather than injected as a bare keycode that would type the wrong symbol.
 package xdo
 
 import (
 	"fmt"
 	"runtime"
 	"strings"
-	"time"
 
 	"github.com/jezek/xgb"
 	"github.com/jezek/xgb/xproto"
 	"github.com/jezek/xgb/xtest"
 )
+
+//go:generate go run ./gen_keysyms.go -o keysyms.go
 
 // Xdo is a connection to an X display used to inject input via XTest.
 type Xdo struct {
@@ -45,6 +59,7 @@ func Open() (*Xdo, error) {
 	}
 
 	min, max := setup.MinKeycode, setup.MaxKeycode
+	// X keycodes are bytes; max-min+1 fits in a byte on real servers.
 	count := byte(max - min + 1)
 	reply, err := xproto.GetKeyboardMapping(conn, min, count).Reply()
 	if err != nil {
@@ -63,7 +78,8 @@ func Open() (*Xdo, error) {
 	return x, nil
 }
 
-// Close closes the underlying X connection. Optional; finalizers also close.
+// Close closes the underlying X connection. Optional; a cleanup also closes
+// the connection when the Xdo value becomes unreachable.
 func (x *Xdo) Close() {
 	if x == nil || x.conn == nil {
 		return
@@ -73,14 +89,15 @@ func (x *Xdo) Close() {
 }
 
 // KeysymByName looks up an X11/xkb-style keysym name (e.g. "Alt_L") without
-// needing a display connection. Names match those accepted by the former
-// libxdo path (XK_ / XKB_KEY_ prefix removed).
+// needing a display connection. Names are exact after optional prefix stripping
+// (see package docs).
 func KeysymByName(name string) (uint32, bool) {
 	return lookupKeysym(name)
 }
 
 // Keycodes resolves a keysym name (or libxdo-style sequence of names joined
-// by '+') to one or more X keycodes using the server keyboard map.
+// by '+') to one or more X keycodes using the server keyboard map. Only base
+// column mappings are used (see package docs).
 func (x *Xdo) Keycodes(keys string) ([]byte, error) {
 	parts := splitKeysequence(keys)
 	if len(parts) == 0 {
@@ -93,65 +110,20 @@ func (x *Xdo) Keycodes(keys string) ([]byte, error) {
 		if !ok {
 			return nil, fmt.Errorf("unknown keysym %q", part)
 		}
-		kc, ok := x.keycodeForKeysym(xproto.Keysym(sym))
-		if !ok {
-			return nil, fmt.Errorf("no keycode mapped for keysym %q (0x%x)", part, sym)
+		kc, err := x.keycodeForKeysym(xproto.Keysym(sym))
+		if err != nil {
+			return nil, fmt.Errorf("keysym %q (0x%x): %w", part, sym, err)
 		}
 		out = append(out, byte(kc))
 	}
 	return out, nil
 }
 
-// SendKeysequenceWindowDown synthesizes key presses for the key sequence.
-// The window argument is retained for API compatibility with the libxdo
-// wrapper; XTest injects into the X server input stream (current focus /
-// grabs), matching CURRENTWINDOW behavior.
-func (x *Xdo) SendKeysequenceWindowDown(_ Window, keys string, _ time.Duration) bool {
-	kcs, err := x.Keycodes(keys)
-	if err != nil {
-		return true // non-zero return meant failure in libxdo
-	}
-	for _, kc := range kcs {
-		if err := x.fakeKey(xproto.KeyPress, kc); err != nil {
-			return true
-		}
-	}
-	return false
-}
-
-// SendKeysequenceWindowUp synthesizes key releases for the key sequence.
-func (x *Xdo) SendKeysequenceWindowUp(_ Window, keys string, _ time.Duration) bool {
-	kcs, err := x.Keycodes(keys)
-	if err != nil {
-		return true
-	}
-	// Release in reverse order (modifiers last), matching common xdotool behavior.
-	for i := len(kcs) - 1; i >= 0; i-- {
-		if err := x.fakeKey(xproto.KeyRelease, kcs[i]); err != nil {
-			return true
-		}
-	}
-	return false
-}
-
-// MouseDown synthesizes a mouse button press (X button numbers, 1-based).
-func (x *Xdo) MouseDown(_ Window, button int) bool {
-	if button < 1 || button > 255 {
-		return true
-	}
-	return x.fakeButton(xproto.ButtonPress, byte(button)) != nil
-}
-
-// MouseUp synthesizes a mouse button release.
-func (x *Xdo) MouseUp(_ Window, button int) bool {
-	if button < 1 || button > 255 {
-		return true
-	}
-	return x.fakeButton(xproto.ButtonRelease, byte(button)) != nil
-}
-
-// KeyDown sends XTest key presses for pre-resolved keycodes (setup-time map).
+// KeyDown sends XTest key presses for pre-resolved keycodes.
 func (x *Xdo) KeyDown(keycodes []byte) error {
+	if x == nil || x.conn == nil {
+		return fmt.Errorf("xdo connection closed")
+	}
 	for _, kc := range keycodes {
 		if err := x.fakeKey(xproto.KeyPress, kc); err != nil {
 			return err
@@ -162,6 +134,9 @@ func (x *Xdo) KeyDown(keycodes []byte) error {
 
 // KeyUp sends XTest key releases for pre-resolved keycodes (reverse order).
 func (x *Xdo) KeyUp(keycodes []byte) error {
+	if x == nil || x.conn == nil {
+		return fmt.Errorf("xdo connection closed")
+	}
 	for i := len(keycodes) - 1; i >= 0; i-- {
 		if err := x.fakeKey(xproto.KeyRelease, keycodes[i]); err != nil {
 			return err
@@ -170,20 +145,33 @@ func (x *Xdo) KeyUp(keycodes []byte) error {
 	return nil
 }
 
-// ButtonDown sends an XTest mouse button press.
+// ButtonDown sends an XTest mouse button press (X button numbers, 1-based).
 func (x *Xdo) ButtonDown(button int) error {
-	if button < 1 || button > 255 {
-		return fmt.Errorf("invalid mouse button: %d", button)
+	if err := validButton(button); err != nil {
+		return err
+	}
+	if x == nil || x.conn == nil {
+		return fmt.Errorf("xdo connection closed")
 	}
 	return x.fakeButton(xproto.ButtonPress, byte(button))
 }
 
 // ButtonUp sends an XTest mouse button release.
 func (x *Xdo) ButtonUp(button int) error {
+	if err := validButton(button); err != nil {
+		return err
+	}
+	if x == nil || x.conn == nil {
+		return fmt.Errorf("xdo connection closed")
+	}
+	return x.fakeButton(xproto.ButtonRelease, byte(button))
+}
+
+func validButton(button int) error {
 	if button < 1 || button > 255 {
 		return fmt.Errorf("invalid mouse button: %d", button)
 	}
-	return x.fakeButton(xproto.ButtonRelease, byte(button))
+	return nil
 }
 
 func (x *Xdo) fakeKey(evType byte, keycode byte) error {
@@ -194,24 +182,36 @@ func (x *Xdo) fakeButton(evType byte, button byte) error {
 	return xtest.FakeInputChecked(x.conn, evType, button, 0, 0, 0, 0, 0).Check()
 }
 
-func (x *Xdo) keycodeForKeysym(sym xproto.Keysym) (xproto.Keycode, bool) {
+// keycodeForKeysym finds a keycode whose base-column (index 0) keysym equals
+// sym. If the keysym only appears on a non-base level, an error is returned.
+func (x *Xdo) keycodeForKeysym(sym xproto.Keysym) (xproto.Keycode, error) {
 	per := int(x.keysymsPerKeycode)
 	if per == 0 {
-		return 0, false
+		return 0, fmt.Errorf("keyboard map has no keysyms per keycode")
 	}
 	n := int(x.max-x.min) + 1
+	var nonBase bool
 	for i := range n {
 		base := i * per
-		for c := range per {
+		if base >= len(x.keyMap) {
+			break
+		}
+		if x.keyMap[base] == sym {
+			return x.min + xproto.Keycode(i), nil
+		}
+		for c := 1; c < per; c++ {
 			if base+c >= len(x.keyMap) {
 				break
 			}
 			if x.keyMap[base+c] == sym {
-				return x.min + xproto.Keycode(i), true
+				nonBase = true
 			}
 		}
 	}
-	return 0, false
+	if nonBase {
+		return 0, fmt.Errorf("only available with modifiers (base-level keysyms only; no auto Shift/AltGr)")
+	}
+	return 0, fmt.Errorf("no keycode mapped")
 }
 
 func lookupKeysym(name string) (uint32, bool) {
@@ -223,21 +223,8 @@ func lookupKeysym(name string) (uint32, bool) {
 	for _, p := range []string{"XKB_KEY_", "XK_", "XF86XK_"} {
 		name = strings.TrimPrefix(name, p)
 	}
-	if v, ok := keysyms[name]; ok {
-		return v, true
-	}
-	// Case-insensitive fallback for common mistakes (e.g. alt_l).
-	if v, ok := keysyms[strings.ToLower(name)]; ok {
-		return v, true
-	}
-	// Title-case single-segment names: "return" -> try "Return" already lower map miss
-	if len(name) > 0 {
-		titled := strings.ToUpper(name[:1]) + strings.ToLower(name[1:])
-		if v, ok := keysyms[titled]; ok {
-			return v, true
-		}
-	}
-	return 0, false
+	v, ok := keysyms[name]
+	return v, ok
 }
 
 // splitKeysequence splits libxdo/xdotool-style sequences ("Control_L+Alt_L").
@@ -257,9 +244,3 @@ func splitKeysequence(keys string) []string {
 	}
 	return out
 }
-
-// Window is retained for API compatibility with the previous wrapper.
-type Window uint32
-
-// CurrentWindow matches libxdo's CURRENTWINDOW (XTest / current focus path).
-const CurrentWindow Window = 0
