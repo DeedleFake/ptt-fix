@@ -55,7 +55,7 @@ Regenerate the keysym table after updating X11 headers (requires libX11 keysym h
 go generate ./internal/xdo
 ```
 
-The committed `internal/xdo/keysyms.go` is enough for builds/tests without those headers. Name lookup is exact after optional `XKB_KEY_` / `XK_` / `XF86XK_` prefix strip. Keycode resolution uses only the base column of the server map (no automatic Shift/AltGr).
+The committed `internal/xdo/keysyms.go` is enough for builds/tests without those headers. Name lookup is exact (case-sensitive) after optional `XKB_KEY_` / `XK_` / `XF86XK_` prefix strip. Keycode resolution uses only the base column of the server map (no automatic Shift/AltGr).
 
 ## Code style and conventions
 
@@ -66,6 +66,7 @@ The committed `internal/xdo/keysyms.go` is enough for builds/tests without those
 - **Imports** — goimports-style groups: standard library, third-party, then `deedles.dev/...`.
 - **Scope** — prefer small, focused changes. Do not reformat unrelated files or drive-by refactors.
 - **No cgo** — keep the tree free of `import "C"` / `#cgo`; injection stays pure-Go X/XTest.
+- **File size** — avoid growing hand-maintained source files past ~1000 lines without decomposing them. **Generated files are exempt** (for example the committed `internal/xdo/keysyms.go` keysym table produced by `go generate`).
 
 ## Agent guidelines
 

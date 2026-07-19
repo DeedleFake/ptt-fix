@@ -76,7 +76,7 @@ func newSender(do *xdo.Xdo, sym config.Sym) (sender, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid mouse button: %w", err)
 		}
-		if err := validMouseButton(int(v)); err != nil {
+		if err := xdo.ValidButton(int(v)); err != nil {
 			return nil, err
 		}
 		return mouseSender{do: do, button: int(v)}, nil
@@ -84,13 +84,6 @@ func newSender(do *xdo.Xdo, sym config.Sym) (sender, error) {
 	default:
 		return nil, fmt.Errorf("invalid sym type: %q", sym.Type)
 	}
-}
-
-func validMouseButton(button int) error {
-	if button < 1 || button > 255 {
-		return fmt.Errorf("invalid mouse button: %d", button)
-	}
-	return nil
 }
 
 type keySender struct {

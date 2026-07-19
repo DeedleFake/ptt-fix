@@ -21,6 +21,8 @@ Usage
 
 The default config uses left alt for push-to-talk, waits 10 seconds before retrying a device that wasn't working, and uses all devices that it finds in `/dev/input/by-id/`. If you would like to modify these settings, first run `ptt-fix -createconfig`. This will write the default config to a file, probably `$HOME/.config/ptt-fix/config` and print the path to that file. The file has lots of comments, so simply open it in the text editor of your choice and modify it however you would like.
 
+Key symbols in the config (`sym`) are **case-sensitive** X11/xkb keysym names (for example `Alt_L`, not `alt_l`). Optional prefixes such as `XKB_KEY_` or `XK_` may be included and are stripped before lookup.
+
 Donate
 ------
 

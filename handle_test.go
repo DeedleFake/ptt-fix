@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -55,8 +56,12 @@ func TestConfigSymsResolveForSenders(t *testing.T) {
 					t.Fatalf("keysym %q not in shipped table", c.Sym.Val)
 				}
 			case "mouse":
-				if err := validMouseButton(2); err != nil {
-					t.Fatalf("mouse validation: %v", err)
+				button, err := strconv.ParseInt(c.Sym.Val, 0, 0)
+				if err != nil {
+					t.Fatalf("parse button %q: %v", c.Sym.Val, err)
+				}
+				if err := xdo.ValidButton(int(button)); err != nil {
+					t.Fatalf("mouse validation for %q: %v", c.Sym.Val, err)
 				}
 			}
 		})
@@ -74,6 +79,10 @@ func TestNewSender_invalidMouseButton(t *testing.T) {
 	_, err = newSender(nil, config.Sym{Type: "mouse", Val: "256"})
 	if err == nil {
 		t.Fatal("expected invalid button 256")
+	}
+	_, err = newSender(nil, config.Sym{Type: "mouse", Val: "-1"})
+	if err == nil {
+		t.Fatal("expected invalid button -1")
 	}
 	_, err = newSender(nil, config.Sym{Type: "mouse", Val: "2"})
 	if err != nil {

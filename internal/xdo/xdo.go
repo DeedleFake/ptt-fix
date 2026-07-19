@@ -9,6 +9,7 @@
 //
 // Names match the usual X11 / xkbcommon macros with optional prefixes stripped
 // (XKB_KEY_, XK_, XF86XK_). Lookup is exact after that strip — no case folding.
+// Names are case-sensitive.
 //
 // # Keycode resolution
 //
@@ -30,14 +31,23 @@ import (
 
 //go:generate go run ./gen_keysyms.go -o keysyms.go
 
+// keysymPrefixes are optional header-style prefixes, longest first, so at most
+// one prefix is stripped (e.g. XKB_KEY_ before XK_).
+var keysymPrefixes = []string{"XKB_KEY_", "XF86XK_", "XK_"}
+
 // Xdo is a connection to an X display used to inject input via XTest.
 type Xdo struct {
-	conn *xgb.Conn
-	min  xproto.Keycode
-	max  xproto.Keycode
+	conn    *xgb.Conn
+	cleanup runtime.Cleanup
+	min     xproto.Keycode
+	max     xproto.Keycode
 	// keyMap is keysyms for each keycode: length (max-min+1)*keysymsPerKeycode
 	keysymsPerKeycode byte
 	keyMap            []xproto.Keysym
+
+	// input, if non-nil, replaces XTest FakeInput. Used by tests to inject
+	// failures without a live display.
+	input func(evType, detail byte) error
 }
 
 // Open connects to the default X display ($DISPLAY) and initializes the XTest extension.
@@ -74,14 +84,19 @@ func Open() (*Xdo, error) {
 		keysymsPerKeycode: reply.KeysymsPerKeycode,
 		keyMap:            reply.Keysyms,
 	}
-	runtime.AddCleanup(x, (*xgb.Conn).Close, conn)
+	x.cleanup = runtime.AddCleanup(x, (*xgb.Conn).Close, conn)
 	return x, nil
 }
 
 // Close closes the underlying X connection. Optional; a cleanup also closes
-// the connection when the Xdo value becomes unreachable.
+// the connection when the Xdo value becomes unreachable unless Close has
+// already stopped that cleanup.
 func (x *Xdo) Close() {
-	if x == nil || x.conn == nil {
+	if x == nil {
+		return
+	}
+	x.cleanup.Stop()
+	if x.conn == nil {
 		return
 	}
 	x.conn.Close()
@@ -89,8 +104,8 @@ func (x *Xdo) Close() {
 }
 
 // KeysymByName looks up an X11/xkb-style keysym name (e.g. "Alt_L") without
-// needing a display connection. Names are exact after optional prefix stripping
-// (see package docs).
+// needing a display connection. Names are exact (case-sensitive) after optional
+// prefix stripping (see package docs).
 func KeysymByName(name string) (uint32, bool) {
 	return lookupKeysym(name)
 }
@@ -99,6 +114,10 @@ func KeysymByName(name string) (uint32, bool) {
 // by '+') to one or more X keycodes using the server keyboard map. Only base
 // column mappings are used (see package docs).
 func (x *Xdo) Keycodes(keys string) ([]byte, error) {
+	if x == nil {
+		return nil, fmt.Errorf("xdo connection closed")
+	}
+
 	parts := splitKeysequence(keys)
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("empty key sequence")
@@ -120,12 +139,19 @@ func (x *Xdo) Keycodes(keys string) ([]byte, error) {
 }
 
 // KeyDown sends XTest key presses for pre-resolved keycodes.
+// If a multi-key sequence fails after some keys were pressed, those already
+// pressed keys are best-effort released in reverse order before the press
+// error is returned.
 func (x *Xdo) KeyDown(keycodes []byte) error {
-	if x == nil || x.conn == nil {
-		return fmt.Errorf("xdo connection closed")
+	if err := x.ready(); err != nil {
+		return err
 	}
-	for _, kc := range keycodes {
+	for i, kc := range keycodes {
 		if err := x.fakeKey(xproto.KeyPress, kc); err != nil {
+			for j := i - 1; j >= 0; j-- {
+				// Best-effort; preserve the original press error.
+				x.fakeKey(xproto.KeyRelease, keycodes[j])
+			}
 			return err
 		}
 	}
@@ -134,8 +160,8 @@ func (x *Xdo) KeyDown(keycodes []byte) error {
 
 // KeyUp sends XTest key releases for pre-resolved keycodes (reverse order).
 func (x *Xdo) KeyUp(keycodes []byte) error {
-	if x == nil || x.conn == nil {
-		return fmt.Errorf("xdo connection closed")
+	if err := x.ready(); err != nil {
+		return err
 	}
 	for i := len(keycodes) - 1; i >= 0; i-- {
 		if err := x.fakeKey(xproto.KeyRelease, keycodes[i]); err != nil {
@@ -145,41 +171,56 @@ func (x *Xdo) KeyUp(keycodes []byte) error {
 	return nil
 }
 
-// ButtonDown sends an XTest mouse button press (X button numbers, 1-based).
-func (x *Xdo) ButtonDown(button int) error {
-	if err := validButton(button); err != nil {
-		return err
-	}
-	if x == nil || x.conn == nil {
-		return fmt.Errorf("xdo connection closed")
-	}
-	return x.fakeButton(xproto.ButtonPress, byte(button))
-}
-
-// ButtonUp sends an XTest mouse button release.
-func (x *Xdo) ButtonUp(button int) error {
-	if err := validButton(button); err != nil {
-		return err
-	}
-	if x == nil || x.conn == nil {
-		return fmt.Errorf("xdo connection closed")
-	}
-	return x.fakeButton(xproto.ButtonRelease, byte(button))
-}
-
-func validButton(button int) error {
+// ValidButton reports whether button is a valid X button number (1–255).
+func ValidButton(button int) error {
 	if button < 1 || button > 255 {
 		return fmt.Errorf("invalid mouse button: %d", button)
 	}
 	return nil
 }
 
+// ButtonDown sends an XTest mouse button press (X button numbers, 1-based).
+func (x *Xdo) ButtonDown(button int) error {
+	if err := ValidButton(button); err != nil {
+		return err
+	}
+	if err := x.ready(); err != nil {
+		return err
+	}
+	return x.fakeButton(xproto.ButtonPress, byte(button))
+}
+
+// ButtonUp sends an XTest mouse button release.
+func (x *Xdo) ButtonUp(button int) error {
+	if err := ValidButton(button); err != nil {
+		return err
+	}
+	if err := x.ready(); err != nil {
+		return err
+	}
+	return x.fakeButton(xproto.ButtonRelease, byte(button))
+}
+
+func (x *Xdo) ready() error {
+	if x == nil || (x.conn == nil && x.input == nil) {
+		return fmt.Errorf("xdo connection closed")
+	}
+	return nil
+}
+
 func (x *Xdo) fakeKey(evType byte, keycode byte) error {
-	return xtest.FakeInputChecked(x.conn, evType, keycode, 0, 0, 0, 0, 0).Check()
+	return x.fakeInput(evType, keycode)
 }
 
 func (x *Xdo) fakeButton(evType byte, button byte) error {
-	return xtest.FakeInputChecked(x.conn, evType, button, 0, 0, 0, 0, 0).Check()
+	return x.fakeInput(evType, button)
+}
+
+func (x *Xdo) fakeInput(evType byte, detail byte) error {
+	if x.input != nil {
+		return x.input(evType, detail)
+	}
+	return xtest.FakeInputChecked(x.conn, evType, detail, 0, 0, 0, 0, 0).Check()
 }
 
 // keycodeForKeysym finds a keycode whose base-column (index 0) keysym equals
@@ -219,12 +260,20 @@ func lookupKeysym(name string) (uint32, bool) {
 	if name == "" {
 		return 0, false
 	}
-	// Accept optional historical prefixes users might paste from headers.
-	for _, p := range []string{"XKB_KEY_", "XK_", "XF86XK_"} {
-		name = strings.TrimPrefix(name, p)
-	}
+	name = stripKeysymPrefix(name)
 	v, ok := keysyms[name]
 	return v, ok
+}
+
+// stripKeysymPrefix removes at most one known header-style prefix, matching the
+// longest applicable prefix first.
+func stripKeysymPrefix(name string) string {
+	for _, p := range keysymPrefixes {
+		if strings.HasPrefix(name, p) {
+			return name[len(p):]
+		}
+	}
+	return name
 }
 
 // splitKeysequence splits libxdo/xdotool-style sequences ("Control_L+Alt_L").

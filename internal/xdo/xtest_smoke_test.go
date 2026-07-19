@@ -25,9 +25,4 @@ func TestXTestSmokeConnectAndResolve(t *testing.T) {
 	if len(kcs) == 0 {
 		t.Fatal("Keycodes(Alt_L) returned empty")
 	}
-
-	// mouse path: valid button id is accepted by the validator; do not send.
-	if err := (&Xdo{}).ButtonDown(0); err == nil {
-		t.Fatal("expected invalid button")
-	}
 }
