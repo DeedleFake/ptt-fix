@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"go/format"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -155,5 +156,9 @@ func writeKeysyms(path string, table map[string]uint32, sources []string, dir st
 	}
 	b.WriteString("}\n")
 
-	return os.WriteFile(path, b.Bytes(), 0o644)
+	formatted, err := format.Source(b.Bytes())
+	if err != nil {
+		return fmt.Errorf("format generated Go: %w", err)
+	}
+	return os.WriteFile(path, formatted, 0o644)
 }
