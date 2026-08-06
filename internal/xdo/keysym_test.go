@@ -531,3 +531,658 @@ func TestClose_stopsCleanup(t *testing.T) {
 		t.Fatalf("cleanup ran %d times after Close+Stop", n.Load())
 	}
 }
+
+func TestScratch_bindsUnmappedOnEmptyKeycode(t *testing.T) {
+	// keycode 8: base 'a'; keycode 9: fully empty → unmapped Alt_R gets 9.
+	const (
+		symA    = xproto.Keysym(0x61)
+		symAltR = xproto.Keysym(0xffea)
+	)
+	var changes []struct {
+		kc   xproto.Keycode
+		syms []xproto.Keysym
+	}
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 2,
+		keyMap: []xproto.Keysym{
+			symA, 0x41,
+			0, 0,
+		},
+		changeMapping: func(kc xproto.Keycode, keysyms []xproto.Keysym) error {
+			syms := append([]xproto.Keysym(nil), keysyms...)
+			changes = append(changes, struct {
+				kc   xproto.Keycode
+				syms []xproto.Keysym
+			}{kc, syms})
+			return nil
+		},
+	}
+
+	kc, err := x.keycodeForKeysym(symAltR)
+	if err != nil {
+		t.Fatalf("unmapped Alt_R with empty slot: %v", err)
+	}
+	if kc != 9 {
+		t.Fatalf("scratch keycode = %d, want 9", kc)
+	}
+	if x.baseKeysym(9) != symAltR {
+		t.Fatalf("local map base[9] = 0x%x, want Alt_R", x.baseKeysym(9))
+	}
+	if len(changes) != 1 || changes[0].kc != 9 || changes[0].syms[0] != symAltR {
+		t.Fatalf("changeMapping calls = %+v, want one bind of Alt_R on 9", changes)
+	}
+	if _, ok := x.scratches[symAltR]; !ok {
+		t.Fatal("expected scratch recorded for Alt_R")
+	}
+
+	// Same keysym reuses the scratch (no second ChangeKeyboardMapping).
+	kc2, err := x.keycodeForKeysym(symAltR)
+	if err != nil {
+		t.Fatalf("reuse: %v", err)
+	}
+	if kc2 != 9 {
+		t.Fatalf("reuse keycode = %d, want 9", kc2)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("reuse must not re-bind; changeMapping calls = %d", len(changes))
+	}
+}
+
+func TestScratch_prefersExistingBaseOverEmpty(t *testing.T) {
+	// Alt_L already on base of keycode 8; empty slot at 9 must not be used.
+	const symAltL = xproto.Keysym(0xffe9)
+	var nChanges int
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{symAltL, 0},
+		changeMapping: func(xproto.Keycode, []xproto.Keysym) error {
+			nChanges++
+			return nil
+		},
+	}
+	kc, err := x.keycodeForKeysym(symAltL)
+	if err != nil {
+		t.Fatalf("mapped Alt_L: %v", err)
+	}
+	if kc != 8 {
+		t.Fatalf("keycode = %d, want 8 (existing base), not empty slot", kc)
+	}
+	if nChanges != 0 {
+		t.Fatalf("must not scratch-bind when base exists; changes = %d", nChanges)
+	}
+	if len(x.scratches) != 0 {
+		t.Fatalf("scratches = %v, want empty", x.scratches)
+	}
+}
+
+func TestScratch_noEmptyKeycodeError(t *testing.T) {
+	// Every keycode has at least one non-zero column → no scratch slot.
+	const symA = xproto.Keysym(0x61)
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 2,
+		keyMap: []xproto.Keysym{
+			symA, 0x41,
+			0, 0xffe9, // base empty but level1 occupied → not fully empty
+		},
+	}
+	_, err := x.keycodeForKeysym(0x123456)
+	if err == nil {
+		t.Fatal("unmapped keysym with no fully empty keycode must fail")
+	}
+	if !strings.Contains(err.Error(), "no empty keycode available for scratch binding") {
+		t.Fatalf("error should mention empty keycode / scratch binding, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "modifiers") {
+		t.Fatalf("should not claim modifiers-only: %v", err)
+	}
+	if len(x.scratches) != 0 {
+		t.Fatalf("scratches = %v, want empty", x.scratches)
+	}
+}
+
+func TestScratch_multipleUnmappedKeysyms(t *testing.T) {
+	const (
+		symAltR   = xproto.Keysym(0xffea)
+		symSuperR = xproto.Keysym(0xffec)
+		symA      = xproto.Keysym(0x61)
+	)
+	x := &Xdo{
+		min:               8,
+		max:               10,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{symA, 0, 0},
+	}
+	kc1, err := x.keycodeForKeysym(symAltR)
+	if err != nil {
+		t.Fatalf("Alt_R: %v", err)
+	}
+	if kc1 != 10 {
+		t.Fatalf("Alt_R keycode = %d, want 10 (high keycode first)", kc1)
+	}
+	kc2, err := x.keycodeForKeysym(symSuperR)
+	if err != nil {
+		t.Fatalf("Super_R: %v", err)
+	}
+	if kc2 != 9 {
+		t.Fatalf("Super_R keycode = %d, want 9 (next highest empty)", kc2)
+	}
+	if len(x.scratches) != 2 {
+		t.Fatalf("scratches len = %d, want 2", len(x.scratches))
+	}
+	// Third unmapped keysym: no empty slots left.
+	_, err = x.keycodeForKeysym(0x123456)
+	if err == nil {
+		t.Fatal("third unmapped keysym must fail when slots exhausted")
+	}
+	if !strings.Contains(err.Error(), "no empty keycode available for scratch binding") {
+		t.Fatalf("exhaustion error = %v", err)
+	}
+}
+
+func TestScratch_closeRestoresMapping(t *testing.T) {
+	const (
+		symA    = xproto.Keysym(0x61)
+		symAltR = xproto.Keysym(0xffea)
+	)
+	var changes []struct {
+		kc   xproto.Keycode
+		syms []xproto.Keysym
+	}
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 2,
+		keyMap: []xproto.Keysym{
+			symA, 0,
+			0, 0,
+		},
+		changeMapping: func(kc xproto.Keycode, keysyms []xproto.Keysym) error {
+			syms := append([]xproto.Keysym(nil), keysyms...)
+			changes = append(changes, struct {
+				kc   xproto.Keycode
+				syms []xproto.Keysym
+			}{kc, syms})
+			return nil
+		},
+	}
+	if _, err := x.keycodeForKeysym(symAltR); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if x.baseKeysym(9) != symAltR {
+		t.Fatalf("before Close base[9] = 0x%x", x.baseKeysym(9))
+	}
+	x.Close()
+	if len(x.scratches) != 0 {
+		t.Fatalf("after Close scratches = %v, want nil/empty", x.scratches)
+	}
+	if x.baseKeysym(9) != 0 {
+		t.Fatalf("after Close base[9] = 0x%x, want NoSymbol", x.baseKeysym(9))
+	}
+	// Last changeMapping call should restore previous (zeros) on keycode 9.
+	if len(changes) < 2 {
+		t.Fatalf("expected bind + restore; changes = %+v", changes)
+	}
+	last := changes[len(changes)-1]
+	if last.kc != 9 || last.syms[0] != 0 || last.syms[1] != 0 {
+		t.Fatalf("restore call = %+v, want keycode 9 all NoSymbol", last)
+	}
+}
+
+func TestScratch_keycodesNamePath(t *testing.T) {
+	// Keycodes("Alt_R") with empty slot succeeds (the v0.9.0 regression).
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{0x61, 0}, // 'a' + empty
+	}
+	kcs, err := x.Keycodes("Alt_R")
+	if err != nil {
+		t.Fatalf("Keycodes(Alt_R): %v", err)
+	}
+	if len(kcs) != 1 || kcs[0] != 9 {
+		t.Fatalf("Keycodes(Alt_R) = %v, want [9]", kcs)
+	}
+}
+
+func TestScratch_ensureAfterMapReload(t *testing.T) {
+	// After a synthetic map reload that drops the scratch, ensureScratches
+	// re-applies it onto the same empty keycode.
+	const symAltR = xproto.Keysym(0xffea)
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{0x61, 0},
+	}
+	kc, err := x.keycodeForKeysym(symAltR)
+	if err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if kc != 9 {
+		t.Fatalf("keycode = %d, want 9", kc)
+	}
+	// Simulate refresh that lost the scratch mapping (empty again).
+	x.keyMap = []xproto.Keysym{0x61, 0}
+	if err := x.ensureScratches(); err != nil {
+		t.Fatalf("ensureScratches: %v", err)
+	}
+	if x.baseKeysym(9) != symAltR {
+		t.Fatalf("after ensure base[9] = 0x%x, want Alt_R", x.baseKeysym(9))
+	}
+	if s, ok := x.scratches[symAltR]; !ok || s.keycode != 9 {
+		t.Fatalf("scratch entry = %v, %v; want keycode 9", s, ok)
+	}
+}
+
+func TestScratch_nonBaseRejectedEvenWithEmptySlot(t *testing.T) {
+	// Alt_L only on non-base of keycode 8; keycode 9 fully empty.
+	// Must reject with modifiers error and must not scratch-bind.
+	const symAltL = xproto.Keysym(0xffe9)
+	var nChanges int
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 2,
+		keyMap: []xproto.Keysym{
+			0, symAltL, // non-base only
+			0, 0, // fully empty
+		},
+		changeMapping: func(xproto.Keycode, []xproto.Keysym) error {
+			nChanges++
+			return nil
+		},
+	}
+	_, err := x.keycodeForKeysym(symAltL)
+	if err == nil {
+		t.Fatal("non-base Alt_L must fail even when empty slot exists")
+	}
+	if !strings.Contains(err.Error(), "modifiers") {
+		t.Fatalf("error should mention modifiers, got: %v", err)
+	}
+	if nChanges != 0 {
+		t.Fatalf("must not call changeMapping; calls = %d", nChanges)
+	}
+	if len(x.scratches) != 0 {
+		t.Fatalf("scratches = %v, want empty", x.scratches)
+	}
+}
+
+func TestScratch_ensureRebindsWhenSlotTaken(t *testing.T) {
+	// After bind on 10, occupy 10 and leave 9 empty; ensure moves scratch to 9.
+	const (
+		symAltR = xproto.Keysym(0xffea)
+		symA    = xproto.Keysym(0x61)
+		symB    = xproto.Keysym(0x62)
+	)
+	x := &Xdo{
+		min:               8,
+		max:               10,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{symA, 0, 0},
+	}
+	kc, err := x.keycodeForKeysym(symAltR)
+	if err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if kc != 10 {
+		t.Fatalf("keycode = %d, want 10", kc)
+	}
+	// Slot 10 taken by something else; 9 still empty; 8 remains 'a'.
+	x.keyMap = []xproto.Keysym{symA, 0, symB}
+	if err := x.ensureScratches(); err != nil {
+		t.Fatalf("ensureScratches: %v", err)
+	}
+	s, ok := x.scratches[symAltR]
+	if !ok || s.keycode != 9 {
+		t.Fatalf("scratch = %v, %v; want keycode 9", s, ok)
+	}
+	if x.baseKeysym(9) != symAltR {
+		t.Fatalf("base[9] = 0x%x, want Alt_R", x.baseKeysym(9))
+	}
+	if x.baseKeysym(10) != symB {
+		t.Fatalf("base[10] = 0x%x, want b (untouched)", x.baseKeysym(10))
+	}
+	x.Close()
+	if x.baseKeysym(9) != 0 {
+		t.Fatalf("after Close base[9] = 0x%x, want NoSymbol", x.baseKeysym(9))
+	}
+	if x.baseKeysym(10) != symB {
+		t.Fatalf("after Close base[10] = 0x%x, want b (only new slot restored)", x.baseKeysym(10))
+	}
+	if len(x.scratches) != 0 {
+		t.Fatalf("scratches after Close = %v", x.scratches)
+	}
+}
+
+func TestScratch_ensureFailsWhenNoEmptyLeft(t *testing.T) {
+	const symAltR = xproto.Keysym(0xffea)
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{0x61, 0},
+	}
+	if _, err := x.keycodeForKeysym(symAltR); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	// Old slot taken, no other empties.
+	x.keyMap = []xproto.Keysym{0x61, 0x62}
+	err := x.ensureScratches()
+	if err == nil {
+		t.Fatal("ensureScratches must fail when no empty keycode remains")
+	}
+	if !strings.Contains(err.Error(), "no empty keycode to re-bind") {
+		t.Fatalf("error = %v", err)
+	}
+	// Undo entry retained for Close attempt.
+	if _, ok := x.scratches[symAltR]; !ok {
+		t.Fatal("scratch entry should remain after failed ensure")
+	}
+}
+
+func TestScratch_ensureDropsWhenNativeBaseAppears(t *testing.T) {
+	const symAltR = xproto.Keysym(0xffea)
+	x := &Xdo{
+		min:               8,
+		max:               10,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{0x61, 0, 0},
+	}
+	if _, err := x.keycodeForKeysym(symAltR); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	// Native base for Alt_R now on 8; old scratch slot 10 empty again in reload view.
+	x.keyMap = []xproto.Keysym{symAltR, 0, 0}
+	// But undo still thinks we own 10 with Alt_R — simulate still having our binding on 10.
+	x.keyMap = []xproto.Keysym{symAltR, 0, symAltR}
+	if err := x.ensureScratches(); err != nil {
+		t.Fatalf("ensureScratches: %v", err)
+	}
+	if _, ok := x.scratches[symAltR]; ok {
+		t.Fatal("scratch should be dropped when native base exists elsewhere")
+	}
+	// Old scratch slot restored to previous (NoSymbol).
+	if x.baseKeysym(10) != 0 {
+		t.Fatalf("base[10] = 0x%x, want NoSymbol after releasing obsolete scratch", x.baseKeysym(10))
+	}
+	if x.baseKeysym(8) != symAltR {
+		t.Fatalf("base[8] = 0x%x, want native Alt_R", x.baseKeysym(8))
+	}
+}
+
+func TestScratch_closeRestoresMultiple(t *testing.T) {
+	const (
+		symAltR   = xproto.Keysym(0xffea)
+		symSuperR = xproto.Keysym(0xffec)
+	)
+	x := &Xdo{
+		min:               8,
+		max:               10,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{0x61, 0, 0},
+	}
+	if _, err := x.keycodeForKeysym(symAltR); err != nil {
+		t.Fatalf("Alt_R: %v", err)
+	}
+	if _, err := x.keycodeForKeysym(symSuperR); err != nil {
+		t.Fatalf("Super_R: %v", err)
+	}
+	if x.baseKeysym(10) != symAltR || x.baseKeysym(9) != symSuperR {
+		t.Fatalf("before Close map = %v", x.keyMap)
+	}
+	x.Close()
+	if len(x.scratches) != 0 {
+		t.Fatalf("scratches = %v", x.scratches)
+	}
+	if x.baseKeysym(9) != 0 || x.baseKeysym(10) != 0 {
+		t.Fatalf("after Close map = %v, want empties at 9 and 10", x.keyMap)
+	}
+}
+
+func TestScratch_partialRestoreContinues(t *testing.T) {
+	const (
+		symAltR   = xproto.Keysym(0xffea)
+		symSuperR = xproto.Keysym(0xffec)
+	)
+	failKc := xproto.Keycode(10)
+	x := &Xdo{
+		min:               8,
+		max:               10,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{0x61, 0, 0},
+		changeMapping: func(kc xproto.Keycode, keysyms []xproto.Keysym) error {
+			if kc == failKc && keysyms[0] == 0 {
+				return errors.New("restore failed")
+			}
+			return nil
+		},
+	}
+	if _, err := x.keycodeForKeysym(symAltR); err != nil {
+		t.Fatalf("Alt_R: %v", err)
+	}
+	if _, err := x.keycodeForKeysym(symSuperR); err != nil {
+		t.Fatalf("Super_R: %v", err)
+	}
+	// Alt_R on 10 (fails restore), Super_R on 9 (succeeds).
+	x.Close()
+	if len(x.scratches) != 0 {
+		t.Fatalf("scratches must be cleared even on partial restore failure: %v", x.scratches)
+	}
+	// Super_R slot restored; Alt_R may remain if restore failed before local write.
+	if x.baseKeysym(9) != 0 {
+		t.Fatalf("base[9] = 0x%x, want restored NoSymbol", x.baseKeysym(9))
+	}
+}
+
+func TestScratch_changeMappingBindFailure(t *testing.T) {
+	bindErr := errors.New("change mapping refused")
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{0x61, 0},
+		changeMapping: func(xproto.Keycode, []xproto.Keysym) error {
+			return bindErr
+		},
+	}
+	_, err := x.keycodeForKeysym(0xffea)
+	if err == nil {
+		t.Fatal("bind must fail when changeMapping fails")
+	}
+	if !errors.Is(err, bindErr) {
+		t.Fatalf("error = %v, want wrap of bindErr", err)
+	}
+	if len(x.scratches) != 0 {
+		t.Fatalf("scratches = %v, want empty on failed bind", x.scratches)
+	}
+	if x.baseKeysym(9) != 0 {
+		t.Fatalf("map must be unchanged; base[9] = 0x%x", x.baseKeysym(9))
+	}
+}
+
+func TestScratch_changeMappingEnsureFailure(t *testing.T) {
+	const symAltR = xproto.Keysym(0xffea)
+	var failReapply bool
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{0x61, 0},
+		changeMapping: func(xproto.Keycode, []xproto.Keysym) error {
+			if failReapply {
+				return errors.New("re-apply refused")
+			}
+			return nil
+		},
+	}
+	if _, err := x.keycodeForKeysym(symAltR); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	x.keyMap = []xproto.Keysym{0x61, 0} // lost scratch locally
+	failReapply = true
+	err := x.ensureScratches()
+	if err == nil {
+		t.Fatal("ensureScratches must fail when changeMapping fails")
+	}
+	if !strings.Contains(err.Error(), "re-apply scratch") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestScratch_keycodeForKeysymReensuresOnDrift(t *testing.T) {
+	// Map drift: scratch recorded, local base cleared; keycodeForKeysym re-ensures.
+	const symAltR = xproto.Keysym(0xffea)
+	x := &Xdo{
+		min:               8,
+		max:               9,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{0x61, 0},
+	}
+	if _, err := x.keycodeForKeysym(symAltR); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	x.keyMap = []xproto.Keysym{0x61, 0} // drift: lost base
+	kc, err := x.keycodeForKeysym(symAltR)
+	if err != nil {
+		t.Fatalf("keycodeForKeysym after drift: %v", err)
+	}
+	if kc != 9 {
+		t.Fatalf("keycode = %d, want 9", kc)
+	}
+	if x.baseKeysym(9) != symAltR {
+		t.Fatalf("base[9] = 0x%x after re-ensure via keycodeForKeysym", x.baseKeysym(9))
+	}
+}
+
+func TestScratch_skipsReservedKeycodeOnStaleMap(t *testing.T) {
+	// Stale local map shows keycode 10 empty, but undo still owns it for Alt_R.
+	// Super_R must take 9, not double-book 10.
+	const (
+		symAltR   = xproto.Keysym(0xffea)
+		symSuperR = xproto.Keysym(0xffec)
+	)
+	x := &Xdo{
+		min:               8,
+		max:               10,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{0x61, 0, 0},
+	}
+	if _, err := x.keycodeForKeysym(symAltR); err != nil {
+		t.Fatalf("Alt_R: %v", err)
+	}
+	// Stale: pretend 10 is empty again without clearing undo.
+	x.keyMap[2] = 0
+	kc, err := x.keycodeForKeysym(symSuperR)
+	if err != nil {
+		t.Fatalf("Super_R: %v", err)
+	}
+	if kc != 9 {
+		t.Fatalf("Super_R keycode = %d, want 9 (10 reserved by Alt_R scratch)", kc)
+	}
+	if x.scratches[symAltR].keycode != 10 {
+		t.Fatalf("Alt_R scratch keycode = %d, want 10", x.scratches[symAltR].keycode)
+	}
+}
+
+func TestScratch_ensureTwoPassReapplyBeforeRebind(t *testing.T) {
+	// Two scratches: after reload, A' s slot is taken (needs rebind) and B's slot
+	// is empty/reserved (needs re-apply). Only B's slot is empty. Single-pass
+	// ensure that rebinds first can fail closed before re-applying B; two-pass
+	// must re-apply B even when A cannot rebind.
+	const (
+		symAltR   = xproto.Keysym(0xffea) // A — will need rebind
+		symSuperR = xproto.Keysym(0xffec) // B — will need re-apply
+		symA      = xproto.Keysym(0x61)
+		symB      = xproto.Keysym(0x62)
+	)
+	x := &Xdo{
+		min:               8,
+		max:               10,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{symA, 0, 0},
+	}
+	if _, err := x.keycodeForKeysym(symAltR); err != nil {
+		t.Fatalf("Alt_R: %v", err)
+	}
+	if _, err := x.keycodeForKeysym(symSuperR); err != nil {
+		t.Fatalf("Super_R: %v", err)
+	}
+	// After binds: 10=Alt_R, 9=Super_R (high-first).
+	if x.scratches[symAltR].keycode != 10 || x.scratches[symSuperR].keycode != 9 {
+		t.Fatalf("scratch keycodes Alt_R=%d Super_R=%d, want 10 and 9",
+			x.scratches[symAltR].keycode, x.scratches[symSuperR].keycode)
+	}
+	// Reload: Alt_R slot taken; Super_R slot empty again; no free empty left.
+	x.keyMap = []xproto.Keysym{symA, 0, symB}
+	err := x.ensureScratches()
+	// Alt_R cannot rebind (only empty was Super_R's reserved slot, now re-applied).
+	if err == nil {
+		t.Fatal("ensure must fail closed for Alt_R rebind with no free empty")
+	}
+	if !strings.Contains(err.Error(), "no empty keycode to re-bind") {
+		t.Fatalf("error = %v", err)
+	}
+	// Super_R must still have been re-applied in pass 1.
+	if x.baseKeysym(9) != symSuperR {
+		t.Fatalf("base[9] = 0x%x, want Super_R re-applied despite Alt_R rebind failure", x.baseKeysym(9))
+	}
+	if s, ok := x.scratches[symSuperR]; !ok || s.keycode != 9 {
+		t.Fatalf("Super_R scratch = %v, %v; want keycode 9", s, ok)
+	}
+	// Alt_R undo retained for Close.
+	if _, ok := x.scratches[symAltR]; !ok {
+		t.Fatal("Alt_R scratch should remain after failed rebind")
+	}
+}
+
+func TestScratch_ensureTwoPassRebindAfterReapply(t *testing.T) {
+	// Same setup as above but with a free empty after B re-applies so A rebinds.
+	const (
+		symAltR   = xproto.Keysym(0xffea)
+		symSuperR = xproto.Keysym(0xffec)
+		symA      = xproto.Keysym(0x61)
+		symB      = xproto.Keysym(0x62)
+	)
+	x := &Xdo{
+		min:               8,
+		max:               11,
+		keysymsPerKeycode: 1,
+		keyMap:            []xproto.Keysym{symA, 0, 0, 0},
+	}
+	if _, err := x.keycodeForKeysym(symAltR); err != nil {
+		t.Fatalf("Alt_R: %v", err)
+	}
+	if _, err := x.keycodeForKeysym(symSuperR); err != nil {
+		t.Fatalf("Super_R: %v", err)
+	}
+	// High-first: Alt_R=11, Super_R=10; 9 still empty.
+	if x.scratches[symAltR].keycode != 11 || x.scratches[symSuperR].keycode != 10 {
+		t.Fatalf("scratch keycodes Alt_R=%d Super_R=%d, want 11 and 10",
+			x.scratches[symAltR].keycode, x.scratches[symSuperR].keycode)
+	}
+	// Alt_R slot taken; Super_R empty; free empty at 9 for rebind.
+	x.keyMap = []xproto.Keysym{symA, 0, 0, symB}
+	if err := x.ensureScratches(); err != nil {
+		t.Fatalf("ensureScratches: %v", err)
+	}
+	if x.baseKeysym(10) != symSuperR {
+		t.Fatalf("base[10] = 0x%x, want Super_R re-applied", x.baseKeysym(10))
+	}
+	s, ok := x.scratches[symAltR]
+	if !ok || s.keycode != 9 {
+		t.Fatalf("Alt_R scratch = %v, %v; want rebind to 9", s, ok)
+	}
+	if x.baseKeysym(9) != symAltR {
+		t.Fatalf("base[9] = 0x%x, want Alt_R after rebind", x.baseKeysym(9))
+	}
+	if x.baseKeysym(11) != symB {
+		t.Fatalf("base[11] = 0x%x, want b left untouched", x.baseKeysym(11))
+	}
+}

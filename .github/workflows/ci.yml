@@ -8,8 +8,34 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CGO_ENABLED: "0"
+
 jobs:
+  # Independent checks run in parallel. setup-go restores a shared module +
+  # build cache (keyed on go.sum) so tools and packages warm across jobs and
+  # subsequent workflow runs.
   check:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: test
+            run: go test -vet=all ./...
+          - name: staticcheck
+            run: go tool staticcheck ./...
+          - name: modernize
+            run: go tool modernize ./...
+          - name: gofmt
+            run: test -z "$(gofmt -l .)"
+          - name: mod-tidy
+            run: go mod tidy && git diff --exit-code go.mod go.sum
+
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -17,12 +43,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          # Default cache: true — caches GOMODCACHE + GOCACHE from go.sum.
 
-      - name: Test
-        run: go test -vet=all ./...
-
-      - name: staticcheck
-        run: go tool staticcheck ./...
-
-      - name: modernize
-        run: go tool modernize ./...
+      - name: ${{ matrix.name }}
+        run: ${{ matrix.run }}
