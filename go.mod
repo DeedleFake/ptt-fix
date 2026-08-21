@@ -1,6 +1,6 @@
 module deedles.dev/ptt-fix
 
-go 1.26.3
+go 1.27.0
 
 require (
 	github.com/jezek/xgb v1.3.1
